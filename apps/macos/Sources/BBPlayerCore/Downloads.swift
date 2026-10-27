@@ -41,8 +41,13 @@ public struct DownloadJob: Codable, Identifiable, Sendable {
         persist()
     }
     public func add(_ track: Track) {
-        guard !jobs.contains(where: { $0.id == track.id }) else { return }
-        jobs.append(DownloadJob(track: track)); persist(); schedule()
+        add([track])
+    }
+    public func add(_ tracks: [Track]) {
+        var seen = Set(jobs.map(\.id))
+        let additions = tracks.filter { seen.insert($0.id).inserted }
+        guard !additions.isEmpty else { return }
+        jobs.append(contentsOf: additions.map { DownloadJob(track: $0) }); persist(); schedule()
     }
     public func pause(_ id: String) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
@@ -81,6 +86,7 @@ public struct DownloadJob: Codable, Identifiable, Sendable {
                     guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
                     jobs[index].status = .downloading
                     let source = try await provider.resolve(job.track)
+                    async let extraChapters = provider.chapters(for: source.track)
                     try Task.checkCancellation()
                     guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
                     let partial = file(id, ext: "part")
@@ -95,17 +101,20 @@ public struct DownloadJob: Codable, Identifiable, Sendable {
                     let handle = try FileHandle(forWritingTo: partial)
                     defer { try? handle.close() }
                     var received = Int64(try handle.seekToEnd())
-                    while jobs[index].total <= 0 || received < jobs[index].total {
+                    while true {
                         try Task.checkCancellation()
                         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+                        if jobs[index].total > 0, received >= jobs[index].total { break }
                         let chunk = try await HTTPRange.fetch(url: source.url, headers: source.headers, offset: received, length: 262_144)
                         try Task.checkCancellation()
+                        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
                         try handle.write(contentsOf: chunk.data)
                         try handle.synchronize()
                         received += Int64(chunk.data.count)
                         jobs[index].received = received; jobs[index].total = chunk.total; persist()
                         if received >= chunk.total { break }
                     }
+                    let chapters = try? await extraChapters
                     try Task.checkCancellation()
                     guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
                     let destination = file(id, ext: "m4a")
@@ -113,7 +122,11 @@ public struct DownloadJob: Codable, Identifiable, Sendable {
                     try FileManager.default.moveItem(at: partial, to: destination)
                     try database.saveState(destination, key: "download-file:" + id)
                     try database.saveState(destination, key: "download-file:" + source.track.id)
-                    let metadata = OfflineAudioMetadata(source: source)
+                    var completeSource = source
+                    if let chapters, !chapters.isEmpty { completeSource.chapters = chapters }
+                    try Task.checkCancellation()
+                    let metadata = OfflineAudioMetadata(source: completeSource)
+                    jobs[index].metadata = metadata
                     try database.saveState(metadata, key: "download-metadata:" + id)
                     try database.saveState(metadata, key: "download-metadata:" + source.track.id)
                     jobs[index].status = .completed; jobs[index].error = nil; persist()

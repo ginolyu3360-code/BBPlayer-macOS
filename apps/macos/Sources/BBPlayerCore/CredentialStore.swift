@@ -2,18 +2,47 @@ import Foundation
 import Security
 
 public enum CredentialStore {
+    private static let accessLock = NSRecursiveLock()
+
+    // Credentials use the legacy login keychain.
+    // This legacy switch is process-local. Serialize all store operations and restore it.
+    static func withInteractionPolicy<T>(allowInteraction: Bool, _ operation: () throws -> T) throws -> T {
+        accessLock.lock()
+        defer { accessLock.unlock() }
+        guard !allowInteraction else { return try operation() }
+        var previous = DarwinBoolean(true)
+        let readStatus = SecKeychainGetUserInteractionAllowed(&previous)
+        guard readStatus == errSecSuccess else { throw keychainError(readStatus) }
+        let setStatus = SecKeychainSetUserInteractionAllowed(false)
+        guard setStatus == errSecSuccess else { throw keychainError(setStatus) }
+        defer { SecKeychainSetUserInteractionAllowed(previous.boolValue) }
+        return try operation()
+    }
+
     private static let service = "com.bbplayer.macos.credentials"
-    public static func read(_ account: String = "bilibili-cookie") throws -> String? {
+    static func readQuery(account: String) -> [String: Any] {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service, kSecAttrAccount as String: account,
             kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        return query
+    }
+    public static func requiresUserInteraction(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == NSOSStatusErrorDomain && [Int(errSecInteractionNotAllowed), Int(errSecAuthFailed), Int(errSecUserCanceled)].contains(error.code)
+    }
+    public static func read(_ account: String = "bilibili-cookie", allowInteraction: Bool = true) throws -> String? {
+        let query = readQuery(account: account)
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = try withInteractionPolicy(allowInteraction: allowInteraction) {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw keychainError(status) }
         return String(data: data, encoding: .utf8)
     }
     public static func write(_ value: String, account: String = "bilibili-cookie") throws {
+        accessLock.lock()
+        defer { accessLock.unlock() }
         guard !value.contains("\n"), !value.contains("\r") else { throw APIError.unavailable("Cookie 不能包含换行符。") }
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service, kSecAttrAccount as String: account]
@@ -28,6 +57,8 @@ public enum CredentialStore {
         } else if updated != errSecSuccess { throw keychainError(updated) }
     }
     public static func delete(_ account: String = "bilibili-cookie") throws {
+        accessLock.lock()
+        defer { accessLock.unlock() }
         let status = SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw keychainError(status) }
     }

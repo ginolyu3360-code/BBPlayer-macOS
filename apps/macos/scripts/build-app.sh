@@ -6,6 +6,16 @@ if [[ "$BUILD_CONFIGURATION" != release && "$BUILD_CONFIGURATION" != debug ]]; t
   print -u2 'Usage: build-app.sh [release|debug]'
   exit 2
 fi
+SIGNING_IDENTITY="${BBPLAYER_CODESIGN_IDENTITY:-}"
+SIGNING_CONFIG="$HOME/Library/Application Support/com.bbplayer.macos-development/signing.json"
+if [[ -z "$SIGNING_IDENTITY" && -f "$SIGNING_CONFIG" ]]; then
+  SIGNING_IDENTITY="$(python3 -c 'import json,re,sys; value=json.load(open(sys.argv[1]))["identity_sha1"]; assert re.fullmatch(r"[0-9A-F]{40}",value), "Invalid saved signing identity"; print(value)' "$SIGNING_CONFIG")"
+fi
+SIGNING_IDENTITY="${SIGNING_IDENTITY:--}"
+if [[ "$SIGNING_IDENTITY" == - ]]; then
+  print -u2 'Warning: ad-hoc signing is enabled. Rebuilt apps may request Keychain access again.'
+  print -u2 'Set BBPLAYER_CODESIGN_IDENTITY to a persistent code-signing identity for subsequent builds and updates.'
+fi
 swift build --package-path "$TASK_ROOT" -c "$BUILD_CONFIGURATION" --product BBPlayerMac
 BUILD_BIN="$(swift build --package-path "$TASK_ROOT" -c "$BUILD_CONFIGURATION" --show-bin-path)"
 BUILD_APP="$TASK_ROOT/build/BBPlayer.app"
@@ -16,6 +26,7 @@ cp "$TASK_ROOT/Info.plist" "$BUILD_APP/Contents/Info.plist"
 for RESOURCE_BUNDLE in "$BUILD_BIN"/*.bundle(N); do
   ditto "$RESOURCE_BUNDLE" "$BUILD_APP/Contents/Resources/${RESOURCE_BUNDLE:t}"
 done
-codesign --force --deep --sign - "$BUILD_APP"
+codesign --force --deep --identifier com.bbplayer.macos --sign "$SIGNING_IDENTITY" "$BUILD_APP"
+codesign --verify --deep --strict "$BUILD_APP"
 print "$BUILD_APP"
 du -sh "$BUILD_APP"

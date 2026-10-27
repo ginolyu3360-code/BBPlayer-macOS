@@ -14,13 +14,18 @@ import Observation
     var section: LibrarySection = .search
     var query = ""
     var searchLocal = false
+    var playlistQuery = ""
+    var historyDate: Date?
+    var historyEvents: [ListeningEvent] = []
     var followedUploader: FollowingProfile?
     var tracks: [Track] = []
     var playlists: [Playlist] = []
     var localPlaylists: [Playlist] = []
     var following: [FollowingProfile] = []
     var profile: BilibiliProfile?
+    var credentialsNeedUnlock = false
     var openedPlaylist: Playlist?
+    var deletedPlaylist: Playlist?
     var page = 1
     var hasMore = false
     var busy = false
@@ -45,16 +50,17 @@ import Observation
     @ObservationIgnored private var importTask: Task<Void, Never>?
     @ObservationIgnored private var routeID = UUID()
 
-    init() throws {
-        let root = try QAOptions.dataRoot ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("com.bbplayer.macos", isDirectory: true)
+    init(dataRoot: URL? = nil, bilibiliClient: BilibiliClient? = nil) throws {
+        let root = try dataRoot ?? QAOptions.dataRoot ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("com.bbplayer.macos", isDirectory: true)
         database = try LibraryDatabase(url: root.appendingPathComponent("library.sqlite"))
-        api = BilibiliClient()
+        api = bilibiliClient ?? BilibiliClient()
         cache = try AudioCache(root: root.appendingPathComponent("stream-cache"))
         player = NativePlaybackEngine(provider: api, database: database, cache: cache)
         downloads = try DownloadManager(root: root.appendingPathComponent("downloads"), provider: api, database: database)
         themes = try ThemeManager(root: root.appendingPathComponent("themes"), api: api, database: database)
         if QAOptions.enabled, QAOptions.value("--qa-theme") != nil, let installed = themes.installed.first { themes.apply(installed) }
         localPlaylists = try database.playlists()
+        deletedPlaylist = try database.deletedPlaylist()
         importJob = try database.state(ImportJob.self, key: "import-job")
         player.onTrackChanged = { [weak self] track in self?.loadLyrics(track) }
         player.onError = { [weak self] error in self?.message = error.localizedDescription }
@@ -62,12 +68,20 @@ import Observation
     }
     func start() async {
         guard !QAOptions.enabled else { updateVisibility(); return }
-        do {
-            if let cookie = try CredentialStore.read() { await api.setCookie(cookie); profile = try await api.profile() }
-        } catch { message = error.localizedDescription }
+        await restoreLogin(allowInteraction: false)
         updateVisibility()
     }
+    func restoreLogin(allowInteraction: Bool) async {
+        do {
+            if let cookie = try CredentialStore.read(allowInteraction: allowInteraction) { await api.setCookie(cookie); profile = try await api.profile() }
+            credentialsNeedUnlock = false
+        } catch {
+            if CredentialStore.requiresUserInteraction(error) { credentialsNeedUnlock = true }
+            else { message = error.localizedDescription }
+        }
+    }
     func navigate(_ destination: LibrarySection) {
+        playlistQuery = ""; historyDate = nil; historyEvents = []
         section = destination; followedUploader = nil; openedPlaylist = nil; page = 1; tracks = []; playlists = []; following = []
         loadSection()
     }
@@ -82,7 +96,7 @@ import Observation
                 let destination = section, requestedPage = page
                 if let followedUploader { resultTracks = try await api.uploaderTracks(userID: followedUploader.id, page: requestedPage) }
                 else if let playlist = openedPlaylist {
-                    if playlist.kind == "local" { resultTracks = try database.tracks(playlistID: playlist.id, limit: 100, offset: (requestedPage - 1) * 100) }
+                    if playlist.kind == "local" { resultTracks = try database.playlistTracks(playlistID: playlist.id, query: playlistQuery, limit: 100, offset: (requestedPage - 1) * 100) }
                     else { resultTracks = try await api.remoteTracks(playlist, page: requestedPage) }
                 } else {
                     switch destination {
@@ -95,9 +109,11 @@ import Observation
                     case .multipart: resultTracks = (try database.state([Track].self, key: "multipart")) ?? []
                     case .history, .profile:
                         let database = database
-                        let result = try await Task.detached { (try database.summary(), try database.recentTracks(limit: 100, offset: (requestedPage - 1) * 100)) }.value
+                        let date = historyDate
+                        let result = try await Task.detached { (try database.summary(), try database.recentTracks(limit: 100, offset: (requestedPage - 1) * 100), try date.map { try database.listeningEvents(on: $0, offset: (requestedPage - 1) * 100) } ?? []) }.value
                         try Task.checkCancellation(); guard routeID == token else { return }
-                        summary = result.0; resultTracks = result.1
+                        summary = result.0; resultTracks = date == nil ? result.1 : result.2.map(\.track)
+                        historyEvents = more ? historyEvents + result.2 : result.2
                     case .downloads, .settings, .themes, .localFiles: break
                     }
                 }
@@ -112,23 +128,65 @@ import Observation
             catch { if routeID == token { message = error.localizedDescription } }
         }
     }
-    func open(_ playlist: Playlist) { openedPlaylist = playlist; tracks = []; page = 1; loadSection() }
+    func open(_ playlist: Playlist) { playlistQuery = ""; openedPlaylist = playlist; tracks = []; page = 1; loadSection() }
     func loadMore() { guard hasMore, !busy else { return }; page += 1; loadSection(more: true) }
     func play(_ track: Track) {
+        if let playlist = openedPlaylist, playlist.kind == "local" {
+            do {
+                let all = try database.playlistTracks(playlistID: playlist.id, query: playlistQuery)
+                guard let index = all.firstIndex(where: { $0.id == track.id }) else { return }
+                player.setQueue(all, index: index)
+            } catch { message = error.localizedDescription }
+            return
+        }
         if let index = tracks.firstIndex(where: { $0.id == track.id }) { player.setQueue(tracks, index: index) }
         else { player.setQueue([track]) }
     }
+    func collectionTracks() throws -> [Track] {
+        if let playlist = openedPlaylist, playlist.kind == "local" { return try database.playlistTracks(playlistID: playlist.id, query: playlistQuery) }
+        return tracks
+    }
+    func playCollection() {
+        do { let all = try collectionTracks(); if !all.isEmpty { player.setQueue(all) } }
+        catch { message = error.localizedDescription }
+    }
+    func enqueueCollection() {
+        do { let added = player.enqueue(try collectionTracks()); message = "已加入队列 \(added) 首歌曲，已跳过重复项。" }
+        catch { message = error.localizedDescription }
+    }
+    func downloadCollection() {
+        do { downloads.add(try collectionTracks()) }
+        catch { message = error.localizedDescription }
+    }
+    func selectHistoryDate(_ date: Date?) { historyDate = date; historyEvents = []; tracks = []; loadSection() }
     func createPlaylist(_ title: String) {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do { try database.savePlaylist(Playlist(title: title), tracks: []); localPlaylists = try database.playlists(); if section == .playlists { loadSection() } }
         catch { message = error.localizedDescription }
     }
     func add(_ track: Track, to playlist: Playlist) {
-        do { try database.append(track, to: playlist.id); localPlaylists = try database.playlists(); if openedPlaylist?.id == playlist.id { loadSection() } }
+        add([track], to: playlist)
+    }
+    func add(_ tracks: [Track], to playlist: Playlist) {
+        do { try database.append(tracks, to: playlist.id); localPlaylists = try database.playlists(); if openedPlaylist?.id == playlist.id { loadSection() } }
         catch { message = error.localizedDescription }
     }
     func deletePlaylist(_ playlist: Playlist) {
-        do { try database.deletePlaylist(playlist.id); localPlaylists = try database.playlists(); loadSection() }
+        do {
+            try database.deletePlaylist(playlist.id)
+            deletedPlaylist = try database.deletedPlaylist()
+            localPlaylists = try database.playlists()
+            if openedPlaylist?.id == playlist.id { navigate(.playlists) } else { loadSection() }
+        }
+        catch { message = error.localizedDescription }
+    }
+    func undoPlaylistDeletion() {
+        do {
+            try database.restoreDeletedPlaylist()
+            deletedPlaylist = nil
+            localPlaylists = try database.playlists()
+            loadSection()
+        }
         catch { message = error.localizedDescription }
     }
     func remove(_ track: Track, from playlist: Playlist) {
@@ -157,10 +215,11 @@ import Observation
             let profile = try await api.profile()
             try CredentialStore.write(cookie)
             self.profile = profile; showLogin = false; loadSection()
+            credentialsNeedUnlock = false
         } catch { await api.setCookie(previous); throw error }
     }
     func logout() async {
-        do { try CredentialStore.delete(); pauseImport(); downloads.pauseAll(); player.pause(); player.stop(); await api.setCookie(""); profile = nil; tracks = []; playlists = [] }
+        do { try CredentialStore.delete(); pauseImport(); downloads.pauseAll(); player.pause(); player.stop(); await api.setCookie(""); profile = nil; credentialsNeedUnlock = false; tracks = []; playlists = [] }
         catch { message = error.localizedDescription }
     }
     func loadLyrics(_ track: Track) {
@@ -200,37 +259,95 @@ import Observation
         } catch { message = error.localizedDescription }
     }
     func resumeImport() {
-        guard !importRunning, importJob != nil else { return }
+        guard !importRunning, let job = importJob, !job.saved else { return }
+        if let until = job.cooldownUntil, until > Date() {
+            message = "匹配暂时冷却中，请在 " + until.formatted(date: .omitted, time: .standard) + " 后继续。"
+            return
+        }
+        importJob?.cooldownUntil = nil
+        importJob?.pauseReason = nil
         importRunning = true
         importTask = Task { [weak self] in
             guard let self else { return }; defer { importRunning = false }
+            var consecutiveEmpty = 0
             while let job = importJob, job.cursor < job.matches.count {
                 let index = job.cursor, song = job.matches[index].song
-                if job.matches[index].reviewed { importJob?.cursor = index + 1; persistImport(); continue }
+                if job.matches[index].reviewed || job.matches[index].track != nil { importJob?.cursor = index + 1; persistImport(); continue }
                 do {
-                    try await Task.sleep(for: .milliseconds(1200))
-                    let results = try await api.search(song.title + " " + song.artist, page: 1)
+                    let sorted = try await api.importCandidates(for: song)
                     try Task.checkCancellation()
-                    let sorted = results.sorted { Matching.score(song, $0) > Matching.score(song, $1) }
                     importJob?.matches[index].candidates = Array(sorted.prefix(8))
                     importJob?.matches[index].selected = sorted.isEmpty ? nil : 0
                     importJob?.matches[index].score = sorted.first.map { Matching.score(song, $0) } ?? 0
-                    importJob?.matches[index].error = sorted.isEmpty ? "没有匹配结果" : nil
+                    importJob?.matches[index].error = sorted.isEmpty ? "未找到歌名相关的结果，请重新搜索或粘贴 B 站视频链接。" : nil
+                    consecutiveEmpty = sorted.isEmpty ? consecutiveEmpty + 1 : 0
+                    if consecutiveEmpty >= 5 {
+                        pauseImportForRecovery("连续 5 首未找到相关结果，可能是搜索受限或关键词不合适。已暂停，请稍后重试失败项。", seconds: 300)
+                        return
+                    }
                 } catch is CancellationError { persistImport(); return }
                 catch {
                     if Task.isCancelled { persistImport(); return }
                     importJob?.matches[index].error = error.localizedDescription
-                    if let error = error as? APIError {
-                        switch error {
-                        case .network, .loginRequired, .cancelled: persistImport(); message = error.localizedDescription; return
-                        case .remote(let code, _) where [412, 429, -412, -352].contains(code): persistImport(); message = "匹配已暂停，请稍后继续。"; return
-                        default: break
-                        }
+                    let reason: String
+                    let rateLimited: Bool
+                    if case APIError.remote(let code, let detail) = error {
+                        reason = "搜索服务错误（\(code)）：\(detail)"
+                        rateLimited = [412, 429, -412, -352].contains(code)
+                    } else {
+                        reason = error.localizedDescription
+                        rateLimited = false
                     }
+                    pauseImportForRecovery(reason + "。当前歌曲未跳过，请稍后继续。", seconds: rateLimited ? 300 : 60)
+                    return
                 }
                 importJob?.cursor = index + 1; persistImport()
             }
         }
+    }
+    @discardableResult func selectImportTrack(_ track: Track, at index: Int, jobID: String) -> Bool {
+        guard var job = importJob, job.id == jobID, !job.saved, job.matches.indices.contains(index) else {
+            message = "导入任务已变化，请重新打开歌曲的搜索窗口。"
+            return false
+        }
+        // Mutate a local value before publishing it to Observation. Reading importJob
+        // during an in-place nested write violates Swift's exclusive-access rule.
+        var match = job.matches[index]
+        if let existing = match.candidates.firstIndex(where: { $0.id == track.id }) {
+            match.candidates[existing] = track
+            match.selected = existing
+        } else {
+            match.candidates.append(track)
+            match.selected = match.candidates.count - 1
+        }
+        match.score = Matching.score(match.song, track)
+        match.error = nil
+        match.reviewed = true
+        job.matches[index] = match
+        do {
+            try database.saveState(job, key: "import-job")
+            importJob = job
+            return true
+        } catch {
+            message = error.localizedDescription
+            return false
+        }
+    }
+    func retryFailedImport() {
+        guard !importRunning, let job = importJob else { return }
+        if let until = job.cooldownUntil, until > Date() {
+            message = "匹配暂时冷却中，请在 " + until.formatted(date: .omitted, time: .standard) + " 后重试。"
+            return
+        }
+        guard importJob?.retryFailures() == true else { return }
+        persistImport()
+        resumeImport()
+    }
+    private func pauseImportForRecovery(_ reason: String, seconds: TimeInterval) {
+        importJob?.pauseReason = reason
+        importJob?.cooldownUntil = Date().addingTimeInterval(seconds)
+        persistImport()
+        message = reason
     }
     func pauseImport() { importTask?.cancel() }
     func persistImport() { do { if let importJob { try database.saveState(importJob, key: "import-job") } } catch { message = error.localizedDescription } }
