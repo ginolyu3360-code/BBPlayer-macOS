@@ -2,6 +2,7 @@ import type { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite/driver'
 import { migrate } from 'drizzle-orm/expo-sqlite/migrator'
 import { useEffect, useReducer } from 'react'
 
+import { expoDb } from '@/lib/db/db'
 import {
 	clearObsoleteLegacyMigrationKeys,
 	migrateIndependentAccountReset,
@@ -10,6 +11,8 @@ import {
 	migrateSortKeysV2,
 	migrateSortKeysV3,
 } from '@/lib/db/migrations'
+import { protectPendingMigration } from '@/lib/db/migrations/protection'
+import { activateLocalSync } from '@/lib/sync/localRecording'
 import log from '@/utils/log'
 
 const logger = log.extend('useFastMigrations')
@@ -64,6 +67,9 @@ export const useFastMigrations = (
 			dispatch({ type: 'migrating' })
 
 			try {
+				protectPendingMigration(
+					Math.max(...migrations.journal.entries.map((entry) => entry.when)),
+				)
 				await migrate(db, migrations)
 				clearObsoleteLegacyMigrationKeys()
 				migrateSortKeysV2()
@@ -71,6 +77,7 @@ export const useFastMigrations = (
 				migratePlayHistory()
 				migrateIndependentAccountReset()
 				migratePlayHistoryToMs()
+				activateLocalSync(expoDb)
 				dispatch({ type: 'migrated', payload: true })
 			} catch (error) {
 				logger.error('迁移失败:', error)

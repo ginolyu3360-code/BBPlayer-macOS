@@ -7,12 +7,19 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("播放") {
+                Picker("网络音轨", selection: Binding(get: { model.player.preferences.audioQuality ?? .aac }, set: { model.player.preferences.audioQuality = $0 })) {
+                    ForEach(AudioQuality.allCases, id: \.self) { quality in Text(quality.label).tag(quality) }
+                }
+                Text("更改在下次加载网络歌曲时生效；账号、来源或解码器不支持时回退 AAC。已有下载按原规格播放。").font(.caption).foregroundStyle(.secondary)
+                if let reason = model.player.streamInfo?.fallbackReason { Text(reason).font(.caption).foregroundStyle(.secondary) }
                 Toggle("根据 B 站响度元数据均衡音量", isOn: $model.player.preferences.normalization)
                 Text("缺少响度数据时保持原始音量；优先使用最高可用常规 AAC。").font(.caption).foregroundStyle(.secondary)
                 Toggle("启动后自动播放恢复的队列", isOn: $model.player.preferences.autoplay)
                 Text("默认关闭。关闭主窗口后继续播放，从菜单栏唤回；退出应用停止播放。").font(.caption).foregroundStyle(.secondary)
             }
+            EqualizerSettingsView(model: model)
             Section("歌词") {
+                LyricPresentationSettings(model: model)
                 Toggle("桌面悬浮歌词", isOn: $model.player.preferences.floatingLyrics)
                 Toggle("锁定并点击穿透", isOn: $model.player.preferences.floatingLocked)
                 Toggle("显示翻译", isOn: $model.player.preferences.showTranslation)
@@ -35,8 +42,10 @@ struct SettingsView: View {
             }
             Section("本机数据") {
                 if model.credentialsNeedUnlock { Button("解锁已保存的登录") { Task { await model.restoreLogin(allowInteraction: true) } } }
-                Text("歌单、历史、偏好保存在本机 SQLite；凭据使用 Keychain。需要授权时，点击解锁入口后才会显示系统提示。首版不上传统计，不启用跨设备同步。").font(.callout).foregroundStyle(.secondary)
+                Text("歌单、历史、偏好保存在本机 SQLite；凭据使用 Keychain。需要授权时，点击解锁入口后才会显示系统提示。不上传统计；设备间同步需单独启用并配对。").font(.callout).foregroundStyle(.secondary)
             }
+            LANSyncSettingsView(model: model)
+            BackupSettingsView(model: model)
         }.formStyle(.grouped).task { cacheSize = (try? await model.cache.size()) ?? 0 }
     }
 }

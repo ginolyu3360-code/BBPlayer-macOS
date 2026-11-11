@@ -5,6 +5,7 @@ import * as Updates from 'expo-updates'
 import { Platform } from 'react-native'
 import { fetch } from 'react-native-nitro-fetch'
 
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import log from '@/utils/log'
 
 const INSTALLATION_KEY = 'update-telemetry-installation-id'
@@ -49,6 +50,7 @@ const randomUUID = (): string => {
 }
 
 const serverURL = (): string | null => {
+	if (isPersonalBuild) return null
 	const extra = Constants.expoConfig?.extra as
 		| { updateServerUrl?: string }
 		| undefined
@@ -84,7 +86,7 @@ const applyUpdateRequestHeaders = async (channel: string): Promise<void> => {
 export const setUpdateChannelOverride = async (
 	channel: string,
 ): Promise<void> => {
-	if (!Updates.isEnabled) {
+	if (isPersonalBuild || !Updates.isEnabled) {
 		throw new Error('expo-updates 未启用')
 	}
 	await SecureStore.setItemAsync(UPDATE_CHANNEL_OVERRIDE_KEY, channel)
@@ -104,7 +106,7 @@ export const setUpdateChannelOverride = async (
  * 开发构建 / expo-updates 未启用 / 未预置该 key 的旧包会抛错，这里吞掉即可。
  */
 export const initializeUpdateRequestHeaders = async (): Promise<void> => {
-	if (requestHeadersOverridden || !Updates.isEnabled) return
+	if (isPersonalBuild || requestHeadersOverridden || !Updates.isEnabled) return
 	try {
 		const channel =
 			(await SecureStore.getItemAsync(UPDATE_CHANNEL_OVERRIDE_KEY)) ??

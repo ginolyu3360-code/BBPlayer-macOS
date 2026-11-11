@@ -246,3 +246,30 @@ final class PlaybackTests: XCTestCase {
         engine.shutdown()
     }
 }
+
+extension PlaybackTests {
+    @MainActor func testRestoreSuspensionPreservesPreferencesAndShutdownRemovesMediaTargets() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let db = try LibraryDatabase(url: root.appendingPathComponent("db"))
+        let cache = try AudioCache(root: root.appendingPathComponent("cache"))
+        var original = PlayerPreferences(); original.volume = 0.37; original.appearance = "dark"
+        try db.saveState(original, key: "preferences")
+        var snapshot = PlaybackSnapshot(); snapshot.position = 42
+        try db.saveState(snapshot, key: "playback")
+        let engine = NativePlaybackEngine(provider: FailingProvider(), database: db, cache: cache, restore: false, writesSuspended: true)
+        engine.preferences.volume = 0.1
+        engine.saveCheckpoint()
+        XCTAssertEqual(try db.state(PlayerPreferences.self, key: "preferences")?.volume, 0.37)
+        XCTAssertEqual(try db.state(PlaybackSnapshot.self, key: "playback")?.position, 42)
+        engine.completeLibraryRestore(preferences: original)
+        XCTAssertEqual(engine.preferences.appearance, "dark")
+        XCTAssertFalse(engine.isPlaybackRequested)
+        XCTAssertGreaterThan(engine.remoteCommandRegistrationCount, 0)
+        engine.shutdown()
+        XCTAssertEqual(engine.remoteCommandRegistrationCount, 0)
+        engine.setQueue([Track(bvid: "ignored", title: "Ignored")])
+        XCTAssertTrue(engine.snapshot.queue.isEmpty)
+        engine.shutdown()
+    }
+}

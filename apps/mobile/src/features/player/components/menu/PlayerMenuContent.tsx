@@ -10,6 +10,7 @@ import { useBatchDownloadStatus } from '@/hooks/queries/orpheus'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import { useModalStore } from '@/hooks/stores/useModalStore'
 import { switchPlayerMode } from '@/lib/player/playbackSession'
+import { trackService } from '@/lib/services/trackService'
 import { toastAndLogError } from '@/utils/error-handling'
 import { getInternalPlayUri } from '@/utils/player'
 import toast from '@/utils/toast'
@@ -147,6 +148,8 @@ export function SharedTrackActions({
 	const router = useRouter()
 	const openModal = useModalStore((state) => state.open)
 	const uploaderMid = Number(currentTrack?.artist?.remoteId ?? undefined)
+	const liked =
+		currentTrack?.source === 'bilibili' && trackService.isLiked(currentTrack.id)
 	return (
 		<>
 			{currentTrack?.source === 'bilibili' && (
@@ -164,6 +167,32 @@ export function SharedTrackActions({
 							openModal('AddVideoToBilibiliFavorite', {
 								bvid: currentTrack.bilibiliMetadata.bvid,
 							})
+						})
+					}
+				/>
+			)}
+			{currentTrack?.source === 'bilibili' && (
+				<List.Item
+					title={liked ? '取消应用内喜欢' : '标记为应用内喜欢'}
+					left={(props) => (
+						<List.Icon
+							{...props}
+							icon={liked ? 'heart' : 'heart-outline'}
+						/>
+					)}
+					onPress={() =>
+						handleAction(() => {
+							void trackService
+								.setLiked(
+									currentTrack.id,
+									!trackService.isLiked(currentTrack.id),
+								)
+								.match(
+									(value) =>
+										toast.success(value ? '已标记为喜欢' : '已取消喜欢'),
+									(error) =>
+										toastAndLogError('保存喜欢失败', error, 'Player.Menu'),
+								)
 						})
 					}
 				/>

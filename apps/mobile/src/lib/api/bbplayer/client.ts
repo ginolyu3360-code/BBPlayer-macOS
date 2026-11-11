@@ -3,6 +3,7 @@ import { hc } from 'hono/client'
 import { fetch } from 'react-native-nitro-fetch'
 
 import useAppStore from '@/hooks/stores/useAppStore'
+import { assertSharedBackendEnabled } from '@/lib/config/personalBuild'
 
 const BASE_URL =
 	process.env.EXPO_PUBLIC_BBPLAYER_API_URL ?? 'https://be.bbplayer.roitium.com'
@@ -24,6 +25,7 @@ const isAuthLoginRequest = (input: Parameters<typeof globalThis.fetch>[0]) => {
 export async function ensureBBPlayerToken(options?: {
 	forceRefresh?: boolean
 }): Promise<void> {
+	assertSharedBackendEnabled()
 	const store = useAppStore.getState()
 	if (!options?.forceRefresh && store.bbplayerToken) return
 
@@ -31,6 +33,7 @@ export async function ensureBBPlayerToken(options?: {
 }
 
 const fetchWithAuthRetry: typeof fetch = async (input, init) => {
+	assertSharedBackendEnabled()
 	const response = await fetch(input, init)
 	// @ts-expect-error
 	if (response.status !== 401 || isAuthLoginRequest(input)) {

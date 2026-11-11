@@ -36,6 +36,7 @@ android {
 }
 
 dependencies {
+    testImplementation "junit:junit:4.13.2"
     implementation 'com.github.HChenX:SuperLyricApi:2.4'
     implementation "androidx.media3:media3-exoplayer:1.9.0"
     implementation "androidx.media3:media3-session:1.9.0"

@@ -158,6 +158,17 @@ declare class NativeOrpheusModule extends NativeModule<OrpheusEvents> {
 	/** 原生服务启动时是否恢复上次保存的队列索引和播放位置。 */
 	restorePlaybackPositionEnabled: boolean
 	/** Android 创建播放器时是否应用已保存的响度标准化增益。 */
+	audioQuality: 'aac' | 'lossless' | 'dolby'
+	getStreamInfo(): Promise<{
+		mime: string
+		codec: string
+		sampleRate: number
+		bitrate: number
+		channels: number
+		fallback: boolean
+	}>
+	getEqualizer(): { enabled: boolean; gains: number[]; status: number }
+	setEqualizer(enabled: boolean, gains: number[]): void
 	loudnessNormalizationEnabled: boolean
 	/** Android 服务恢复状态后是否自动开始播放。 */
 	autoplayOnStartEnabled: boolean

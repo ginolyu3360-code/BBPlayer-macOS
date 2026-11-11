@@ -23,8 +23,10 @@ public struct ListeningEvent: Identifiable, Sendable {
 
 public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
     public let pool: DatabasePool
+    let databaseURL: URL
     private let encoder = JSONEncoder()
     public init(url: URL) throws {
+        databaseURL = url
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         pool = try DatabasePool(path: url.path)
         var migrator = DatabaseMigrator()
@@ -45,6 +47,22 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
                 CREATE TABLE resume (track_id TEXT PRIMARY KEY, position REAL NOT NULL, rate REAL NOT NULL);
                 CREATE TABLE lyric (track_id TEXT PRIMARY KEY, payload BLOB NOT NULL);
                 """)
+        }
+        migrator.registerMigration("native-v2-song-identity") { db in
+            try SongIdentitySchema.migrate(db)
+        }
+        migrator.registerMigration("native-v3-sync") { db in
+            try SyncEngine.migrate(db)
+        }
+        // Only an existing schema with pending migrations needs rollback material.
+        // Never recover a failed open/migration by replacing the library with an empty one.
+        let needsProtection = try pool.read { db in
+            try !migrator.hasCompletedMigrations(db) && Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")! > 0
+        }
+        if needsProtection {
+            let directory = url.deletingLastPathComponent().appendingPathComponent("migration-backups", isDirectory: true)
+            let destination = directory.appendingPathComponent("\(url.lastPathComponent)-\(UUID().uuidString).sqlite")
+            try DatabaseSnapshot.create(from: pool, at: destination)
         }
         try migrator.migrate(pool)
     }
@@ -70,12 +88,15 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
     public func savePlaylist(_ playlist: Playlist, tracks: [Track]) throws {
         let data = try JSONEncoder().encode(playlist)
         try pool.write { db in
+            let before = try SyncEngine.playlistState(playlist.id, in: db)
             try db.execute(sql: "INSERT INTO playlist(id,title,payload) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,payload=excluded.payload", arguments: [playlist.id, playlist.title, data])
             try db.execute(sql: "DELETE FROM playlist_track WHERE playlist_id=?", arguments: [playlist.id])
             for (index, track) in tracks.enumerated() {
                 try Self.upsert(track, in: db)
-                try db.execute(sql: "INSERT OR IGNORE INTO playlist_track VALUES(?,?,?)", arguments: [playlist.id, track.id, index])
+                let sourceID = try SongIdentitySchema.librarySourceID(trackID: track.id, in: db)
+                try db.execute(sql: "INSERT OR IGNORE INTO playlist_track VALUES(?,?,?)", arguments: [playlist.id, sourceID, index])
             }
+            try SyncEngine.capturePlaylist(playlist.id, before: before, library: self, db: db)
         }
     }
     public func append(_ track: Track, to playlistID: String) throws {
@@ -83,36 +104,48 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
     }
     public func append(_ tracks: [Track], to playlistID: String) throws {
         try pool.write { db in
+            let before = try SyncEngine.playlistState(playlistID, in: db)
             var order = try Int.fetchOne(db, sql: "SELECT COALESCE(MAX(sort_order),-1)+1 FROM playlist_track WHERE playlist_id=?", arguments: [playlistID]) ?? 0
             for track in tracks {
                 try Self.upsert(track, in: db)
-                try db.execute(sql: "INSERT OR IGNORE INTO playlist_track VALUES(?,?,?)", arguments: [playlistID, track.id, order])
+                let sourceID = try SongIdentitySchema.librarySourceID(trackID: track.id, in: db)
+                try db.execute(sql: "INSERT OR IGNORE INTO playlist_track VALUES(?,?,?)", arguments: [playlistID, sourceID, order])
                 if db.changesCount > 0 { order += 1 }
             }
+            try SyncEngine.capturePlaylist(playlistID, before: before, library: self, db: db)
         }
     }
     public func removeTrack(_ trackID: String, from playlistID: String) throws {
-        try pool.write { try $0.execute(sql: "DELETE FROM playlist_track WHERE playlist_id=? AND track_id=?", arguments: [playlistID, trackID]) }
+        try pool.write { db in
+            let before = try SyncEngine.playlistState(playlistID, in: db)
+            try db.execute(sql: "DELETE FROM playlist_track WHERE playlist_id=? AND track_id=?", arguments: [playlistID, trackID])
+            try SyncEngine.capturePlaylist(playlistID, before: before, library: self, db: db)
+        }
     }
     public func renamePlaylist(_ id: String, title: String) throws {
         try pool.write { db in
+            let before = try SyncEngine.playlistState(id, in: db)
             guard let data = try Data.fetchOne(db, sql: "SELECT payload FROM playlist WHERE id=?", arguments: [id]) else { return }
             var playlist = try JSONDecoder().decode(Playlist.self, from: data); playlist.title = title
             try db.execute(sql: "UPDATE playlist SET title=?,payload=? WHERE id=?", arguments: [title, try JSONEncoder().encode(playlist), id])
+            try SyncEngine.capturePlaylist(id, before: before, library: self, db: db)
         }
     }
     public func moveTrack(_ trackID: String, in playlistID: String, forward: Bool) throws {
         try pool.write { db in
+            let before = try SyncEngine.playlistState(playlistID, in: db)
             guard let order = try Int.fetchOne(db, sql: "SELECT sort_order FROM playlist_track WHERE playlist_id=? AND track_id=?", arguments: [playlistID, trackID]) else { return }
             let comparison = forward ? ">" : "<", sorting = forward ? "ASC" : "DESC"
             guard let row = try Row.fetchOne(db, sql: "SELECT track_id,sort_order FROM playlist_track WHERE playlist_id=? AND sort_order \(comparison) ? ORDER BY sort_order \(sorting) LIMIT 1", arguments: [playlistID, order]) else { return }
             let neighborID: String = row["track_id"], neighborOrder: Int = row["sort_order"]
             try db.execute(sql: "UPDATE playlist_track SET sort_order=? WHERE playlist_id=? AND track_id=?", arguments: [neighborOrder, playlistID, trackID])
             try db.execute(sql: "UPDATE playlist_track SET sort_order=? WHERE playlist_id=? AND track_id=?", arguments: [order, playlistID, neighborID])
+            try SyncEngine.capturePlaylist(playlistID, before: before, library: self, db: db)
         }
     }
     public func deletePlaylist(_ id: String) throws {
         try pool.write { db in
+            let before = try SyncEngine.playlistState(id, in: db)
             guard let data = try Data.fetchOne(db, sql: "SELECT payload FROM playlist WHERE id=?", arguments: [id]) else { return }
             var playlist = try JSONDecoder().decode(Playlist.self, from: data)
             guard playlist.kind == "local" else { return }
@@ -122,6 +155,7 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             let snapshot = try JSONEncoder().encode(DeletedPlaylistSnapshot(playlist: playlist, tracks: tracks))
             try db.execute(sql: "INSERT INTO state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", arguments: ["deleted-playlist", snapshot])
             try db.execute(sql: "DELETE FROM playlist WHERE id=?", arguments: [id])
+            try SyncEngine.capturePlaylist(id, before: before, library: self, db: db)
         }
     }
     public func deletedPlaylist() throws -> Playlist? {
@@ -132,6 +166,7 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             guard let data = try Data.fetchOne(db, sql: "SELECT value FROM state WHERE key=?", arguments: ["deleted-playlist"]) else { return nil }
             let snapshot = try JSONDecoder().decode(DeletedPlaylistSnapshot.self, from: data)
             let playlist = snapshot.playlist
+            let before = try SyncEngine.playlistState(playlist.id, in: db)
             guard try !Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM playlist WHERE id=?)", arguments: [playlist.id])! else {
                 throw NSError(domain: "BBPlayer.Library", code: 1, userInfo: [NSLocalizedDescriptionKey: "同一歌单已存在，未覆盖现有内容。删除恢复记录仍保留。"])
             }
@@ -139,9 +174,12 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             for (index, track) in snapshot.tracks.enumerated() {
                 // Shared track metadata may have changed since deletion; do not overwrite it.
                 try db.execute(sql: "INSERT OR IGNORE INTO track VALUES(?,?,?,?)", arguments: [track.id, track.title, track.artist, try JSONEncoder().encode(track)])
-                try db.execute(sql: "INSERT INTO playlist_track VALUES(?,?,?)", arguments: [playlist.id, track.id, index])
+                try SongIdentitySchema.ensureSource(trackID: track.id, in: db)
+                let sourceID = try SongIdentitySchema.librarySourceID(trackID: track.id, in: db)
+                try db.execute(sql: "INSERT OR IGNORE INTO playlist_track VALUES(?,?,?)", arguments: [playlist.id, sourceID, index])
             }
             try db.execute(sql: "DELETE FROM state WHERE key=?", arguments: ["deleted-playlist"])
+            try SyncEngine.capturePlaylist(playlist.id, before: before, library: self, db: db)
             return playlist
         }
     }
@@ -173,6 +211,9 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
                 INSERT INTO history(id,track_id,started,listened,completed) VALUES(?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET listened=MAX(history.listened,excluded.listened),completed=MAX(history.completed,excluded.completed)
                 """, arguments: [id, track.id, started.timeIntervalSince1970, listened, completed])
+            // Read the persisted event identity: checkpoints may only increase its totals.
+            // Reusing an event ID must never change its original source or snapshot.
+            try SongIdentitySchema.snapshotHistory(id: id, evidence: .recordedAtPlayback, in: db)
         }
     }
     public func summary() throws -> HistorySummary {
@@ -182,21 +223,21 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             for row in try Row.fetchAll(db, sql: "SELECT date(started,'unixepoch','localtime') AS day,SUM(listened) AS seconds FROM history GROUP BY day") {
                 days[row["day"]] = row["seconds"]
             }
-            let ranking = try Row.fetchAll(db, sql: "SELECT t.payload,SUM(h.listened) AS seconds,COUNT(*) AS plays FROM history h JOIN track t ON t.id=h.track_id GROUP BY h.track_id ORDER BY seconds DESC LIMIT 100")
+            let ranking = try Row.fetchAll(db, sql: "SELECT t.payload,SUM(h.listened) AS seconds,COUNT(*) AS plays FROM history h JOIN history_source_snapshot hs ON hs.history_id=h.id JOIN library_song s ON s.id=hs.song_id JOIN track t ON t.id=s.active_source_id GROUP BY s.id ORDER BY seconds DESC LIMIT 100")
                 .map { row in (track: try JSONDecoder().decode(Track.self, from: row["payload"]), seconds: row["seconds"] as Double, count: row["plays"] as Int) }
             return HistorySummary(seconds: total["seconds"], completed: total["completed"], days: days, ranking: ranking)
         }
     }
     public func recentTracks(limit: Int = 100, offset: Int = 0) throws -> [Track] {
         try pool.read { db in
-            try Row.fetchAll(db, sql: "SELECT t.payload FROM track t JOIN history h ON h.track_id=t.id GROUP BY t.id ORDER BY MAX(h.started) DESC LIMIT ? OFFSET ?", arguments: [limit, offset])
+            try Row.fetchAll(db, sql: "SELECT t.payload FROM history h JOIN history_source_snapshot hs ON hs.history_id=h.id JOIN library_song s ON s.id=hs.song_id JOIN track t ON t.id=s.active_source_id GROUP BY s.id ORDER BY MAX(h.started) DESC LIMIT ? OFFSET ?", arguments: [limit, offset])
                 .map { try JSONDecoder().decode(Track.self, from: $0["payload"]) }
         }
     }
     public func listeningEvents(on date: Date, limit: Int = 100, offset: Int = 0, calendar: Calendar = .current) throws -> [ListeningEvent] {
         guard let interval = calendar.dateInterval(of: .day, for: date) else { return [] }
         return try pool.read { db in
-            try Row.fetchAll(db, sql: "SELECT h.id,t.payload,h.started,h.listened,h.completed FROM history h JOIN track t ON t.id=h.track_id WHERE h.started>=? AND h.started<? ORDER BY h.started DESC,h.id DESC LIMIT ? OFFSET ?", arguments: [interval.start.timeIntervalSince1970, interval.end.timeIntervalSince1970, limit, offset]).map { row in
+            try Row.fetchAll(db, sql: "SELECT h.id,s.payload,h.started,h.listened,h.completed FROM history h JOIN history_source_snapshot s ON s.history_id=h.id WHERE h.started>=? AND h.started<? ORDER BY h.started DESC,h.id DESC LIMIT ? OFFSET ?", arguments: [interval.start.timeIntervalSince1970, interval.end.timeIntervalSince1970, limit, offset]).map { row in
                 ListeningEvent(id: row["id"], track: try JSONDecoder().decode(Track.self, from: row["payload"]), started: Date(timeIntervalSince1970: row["started"]), seconds: row["listened"], completed: row["completed"])
             }
         }
@@ -211,9 +252,19 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             return (row["position"], row["rate"])
         }
     }
-    public func saveLyrics(_ document: LyricDocument, trackID: String) throws {
+    public func saveLyrics(_ document: LyricDocument, trackID: String, synchronize: Bool = true, track: Track? = nil) throws {
         let data = try JSONEncoder().encode(document)
-        try pool.write { try $0.execute(sql: "INSERT INTO lyric VALUES(?,?) ON CONFLICT(track_id) DO UPDATE SET payload=excluded.payload", arguments: [trackID, data]) }
+        try pool.write { db in
+            if let track {
+                guard track.id == trackID else { throw SyncEngineError.invalidOperation }
+                try Self.upsert(track, in: db)
+            }
+            try db.execute(sql: "INSERT INTO lyric VALUES(?,?) ON CONFLICT(track_id) DO UPDATE SET payload=excluded.payload", arguments: [trackID, data])
+            if synchronize {
+                try db.execute(sql: "INSERT OR IGNORE INTO sync_lyric_choice VALUES(?)", arguments: [trackID])
+                try SyncEngine.captureLyrics(document, sourceID: trackID, library: self, db: db)
+            }
+        }
     }
     public func lyrics(trackID: String) throws -> LyricDocument? {
         try pool.read { db in
@@ -221,8 +272,23 @@ public final class LibraryDatabase: LibraryRepository, @unchecked Sendable {
             return try JSONDecoder().decode(LyricDocument.self, from: data)
         }
     }
+    public func isLiked(trackID: String) throws -> Bool {
+        try pool.read { db in
+            try Bool.fetchOne(db, sql: "SELECT l.liked FROM sync_like l JOIN song_source m ON m.song_id=l.song_id WHERE m.source_id=?", arguments: [trackID]) ?? false
+        }
+    }
+    public func setLiked(_ liked: Bool, track: Track) throws {
+        guard track.source == "bilibili" else { throw SyncEngineError.invalidOperation }
+        try pool.write { db in
+            try Self.upsert(track, in: db)
+            let song = try String.fetchOne(db, sql: "SELECT song_id FROM song_source WHERE source_id=?", arguments: [track.id])!
+            try db.execute(sql: "INSERT INTO sync_like VALUES(?,?) ON CONFLICT(song_id) DO UPDATE SET liked=excluded.liked", arguments: [song, liked])
+            try SyncEngine.captureLike(song, liked: liked, library: self, db: db)
+        }
+    }
     private static func upsert(_ track: Track, in db: Database) throws {
         let data = try JSONEncoder().encode(track)
         try db.execute(sql: "INSERT INTO track VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,artist=excluded.artist,payload=excluded.payload", arguments: [track.id, track.title, track.artist, data])
+        try SongIdentitySchema.ensureSource(trackID: track.id, in: db)
     }
 }

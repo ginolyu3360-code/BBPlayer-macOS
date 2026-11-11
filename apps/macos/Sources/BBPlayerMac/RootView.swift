@@ -16,7 +16,7 @@ struct RootView: View {
     @State private var splashURL: URL?
     @State private var didLoadSplash = false
     private let main: [LibrarySection] = [.search, .playlists, .favorites, .collections, .multipart]
-    private let personal: [LibrarySection] = [.following, .watchLater, .downloads, .history, .profile]
+    private let personal: [LibrarySection] = [.following, .watchLater, .downloads, .localFiles, .history, .profile]
     var body: some View {
         HStack(spacing: 0) {
             sidebar.frame(width: min(300, max(180, sidebarWidth)))
@@ -37,6 +37,7 @@ struct RootView: View {
                 MiniPlayerBar(model: model)
             }
         }
+        .disabled(model.isRestoringLibrary)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let deleted = model.deletedPlaylist {
                 HStack {
@@ -166,6 +167,7 @@ struct RootView: View {
         case .settings: SettingsView(model: model)
         case .themes: ThemesView(model: model)
         case .downloads: DownloadsView(model: model)
+        case .localFiles: LocalMusicView(model: model)
         case .history, .profile: HistoryView(model: model)
         default:
             if !model.playlists.isEmpty && model.openedPlaylist == nil { playlistGrid }
@@ -260,6 +262,8 @@ struct TrackRow: View {
     let index: Int
     @Environment(\.colorScheme) private var scheme
     @State private var hovered = false
+    @State private var replacementSongID: UUID?
+    @State private var liked = false
     var body: some View {
         HStack(spacing: 14) {
             Text(String(index)).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 26)
@@ -272,6 +276,10 @@ struct TrackRow: View {
         }.padding(.horizontal, 10).padding(.vertical, 8)
             .background(hovered ? MD.surface(scheme) : .clear, in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle()).onTapGesture(count: 2) { model.play(track) }.onHover { hovered = $0 }.contextMenu { actions }
+            .onAppear { liked = (try? model.database.isLiked(trackID: track.id)) ?? false }
+            .sheet(isPresented: Binding(get: { replacementSongID != nil }, set: { if !$0 { replacementSongID = nil } }), onDismiss: { model.player.endPreview() }) {
+                if let replacementSongID { SourceReplacementView(model: model, songID: replacementSongID, original: track) }
+            }
     }
     private func move(in playlist: Playlist, forward: Bool) { do { try model.database.moveTrack(track.id, in: playlist.id, forward: forward); model.loadSection() } catch { model.message = error.localizedDescription } }
     @ViewBuilder private var actions: some View {
@@ -279,9 +287,20 @@ struct TrackRow: View {
         Button("下一首播放") { model.player.enqueue(track, next: true) }
         Button("加入播放队列") { model.player.enqueue(track) }
         Menu("添加到歌单") { ForEach(model.localPlaylists) { playlist in Button(playlist.title) { model.add(track, to: playlist) } } }
-        Button("下载离线音频") { model.downloads.add(track) }
-        Button("展开分 P") { model.expandPages(track) }
-        if let url = URL(string: "https://www.bilibili.com/video/" + track.bvid) { Link("在 B 站打开", destination: url) }
+        if track.source == "bilibili" {
+            Button("下载离线音频") { model.downloads.add(track) }
+        if track.source == "bilibili" {
+            Button(liked ? "取消喜欢" : "标记喜欢") {
+                do { try model.database.setLiked(!liked, track: track); liked.toggle() }
+                catch { model.message = error.localizedDescription }
+            }
+        }
+            Button("展开分 P") { model.expandPages(track) }
+        } else if track.source == "local" { Button("重新关联原文件…") { model.chooseLocalAudio(relinking: track) } }
+        if track.source == "bilibili", let song = try? model.database.songIdentity(sourceID: track.id) {
+            Button("替换音乐来源…") { replacementSongID = song.id }
+        }
+        if track.source == "bilibili", let url = URL(string: "https://www.bilibili.com/video/" + track.bvid) { Link("在 B 站打开", destination: url) }
         if let playlist = model.openedPlaylist, playlist.kind == "local" { Divider()
             Button("在歌单中上移") { move(in: playlist, forward: false) }
             Button("在歌单中下移") { move(in: playlist, forward: true) }

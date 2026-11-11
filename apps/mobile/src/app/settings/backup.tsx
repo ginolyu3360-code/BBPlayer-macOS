@@ -8,6 +8,7 @@ import {
 	Appbar,
 	Divider,
 	List,
+	RadioButton,
 	Text,
 	TextInput,
 	useTheme,
@@ -28,6 +29,7 @@ import {
 	normalizeWebDavBackupConfig,
 	useWebDavBackups,
 } from '@/hooks/queries/backup'
+import { listAutomaticBackups } from '@/lib/backup/automatic'
 import { createBackup } from '@/lib/backup/export'
 import { restoreBackup } from '@/lib/backup/import'
 import {
@@ -54,8 +56,10 @@ export default function BackupSettingsPage() {
 	const [directory, setDirectory] = useState(
 		initialConfig?.directory ?? '/BBPlayer',
 	)
+	const [importMode, setImportMode] = useState('merge')
 	const [isExporting, setIsExporting] = useState(false)
 	const [isImporting, setIsImporting] = useState(false)
+	const [automaticBackups] = useState(listAutomaticBackups)
 	const isExportingRef = useRef(false)
 	const isImportingRef = useRef(false)
 	const isPasswordEditedRef = useRef(false)
@@ -132,6 +136,45 @@ export default function BackupSettingsPage() {
 		}
 	}
 
+	const restoreFromUri = async (
+		uri: string,
+		merge = false,
+		preferImportedMetadata = false,
+	) => {
+		if (isImportingRef.current) return
+		isImportingRef.current = true
+		setIsImporting(true)
+		try {
+			await restoreBackup(uri, { merge, preferImportedMetadata })
+			showRestartPrompt()
+		} catch (error) {
+			toastAndLogError('恢复失败', error, 'UI.Settings.Backup')
+		} finally {
+			setIsImporting(false)
+			isImportingRef.current = false
+		}
+	}
+
+	const confirmRestore = (uri: string) =>
+		alert(
+			importMode === 'restore' ? '完整恢复备份' : '合并备份',
+			importMode === 'restore'
+				? '当前歌单、历史和偏好将被替换。登录信息保留，恢复前数据会留作回滚。完成后需重启。'
+				: `保留现有顺序并追加新歌曲，重复历史不再累计。冲突内容${importMode === 'imported' ? '使用备份版本' : '保留本机版本'}。播放会暂停，完成后需重启。`,
+			[
+				{ text: '取消' },
+				{
+					text: '继续',
+					onPress: () =>
+						void restoreFromUri(
+							uri,
+							importMode !== 'restore',
+							importMode === 'imported',
+						),
+				},
+			],
+		)
+
 	const handleLocalImport = async () => {
 		if (isImportingRef.current) return
 		isImportingRef.current = true
@@ -140,8 +183,7 @@ export default function BackupSettingsPage() {
 			const result = await DocumentPicker.getDocumentAsync()
 			const file = result.canceled ? undefined : result.assets?.[0]
 			if (!file) return
-			await restoreBackup(file.uri)
-			showRestartPrompt()
+			confirmRestore(file.uri)
 		} catch (error) {
 			toastAndLogError('导入失败', error, 'UI.Settings.Backup')
 		} finally {
@@ -187,6 +229,42 @@ export default function BackupSettingsPage() {
 						导入数据
 					</Button>
 				</View>
+
+				<RadioButton.Group
+					value={importMode}
+					onValueChange={setImportMode}
+				>
+					<RadioButton.Item
+						label='合并 · 冲突保留本机内容'
+						value='merge'
+						disabled={isImporting}
+					/>
+					<RadioButton.Item
+						label='合并 · 冲突使用备份内容'
+						value='imported'
+						disabled={isImporting}
+					/>
+					<RadioButton.Item
+						label='完整恢复 · 替换当前资料库'
+						value='restore'
+						disabled={isImporting}
+					/>
+				</RadioButton.Group>
+				<Text variant='bodySmall'>
+					每天首次启动时检查变化，自动保留最近 10
+					份。备份不包含音频文件或登录信息。
+				</Text>
+				{automaticBackups.map((file) => (
+					<List.Item
+						key={file.uri}
+						title={new Date(
+							Number(file.name.match(/\d+/)?.[0]),
+						).toLocaleString()}
+						description='自动备份 · 点击恢复'
+						disabled={isImporting}
+						onPress={() => confirmRestore(file.uri)}
+					/>
+				))}
 
 				<Divider style={styles.divider} />
 				<SettingsSectionTitle title='WebDAV' />
@@ -348,10 +426,12 @@ function confirmCloudRestore(
 }
 
 function showRestartPrompt() {
-	alert('恢复完成', '数据已恢复，需要重启应用才能完全生效。是否立即重启？', [
-		{ text: '稍后' },
-		{ text: '立即重启', onPress: () => void Expo.reloadAppAsync() },
-	])
+	alert(
+		'恢复完成',
+		'数据已恢复，请重启应用以加载恢复后的歌单和偏好。',
+		[{ text: '重启应用', onPress: () => void Expo.reloadAppAsync() }],
+		{ cancelable: false },
+	)
 }
 
 function formatBackupDate(entry: WebDavEntry): string {

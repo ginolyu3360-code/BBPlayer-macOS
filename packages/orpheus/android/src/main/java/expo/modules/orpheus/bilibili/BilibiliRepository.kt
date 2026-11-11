@@ -52,6 +52,7 @@ object BilibiliRepository {
     /**
      * 解析音频 URL
      */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun resolveAudioUrl(
         bvid: String,
         cid: Long?,
@@ -109,28 +110,8 @@ object BilibiliRepository {
             return durl[0].url to volume
         }
 
-        if (enableDolby && dash.dolby?.audio?.isNotEmpty() == true) {
-            Log.d(TAG, "select dolby source")
-            return dash.dolby.audio[0].baseUrl to volume
-        }
-
-        if (enableHiRes && dash.flac?.audio != null) {
-            Log.d(TAG, "select hires source")
-            return dash.flac.audio.baseUrl to volume
-        }
-
-        if (dash.audio.isNullOrEmpty()) {
-            throw IOException("AudioStreamError: 未找到有效的音频流数据")
-        }
-
-        val targetAudio = dash.audio.find { it.id == audioQuality }
-
-        if (targetAudio != null) {
-            return targetAudio.baseUrl to volume
-        } else {
-            val highestQualityAudio = dash.audio[0]
-            return highestQualityAudio.baseUrl to volume
-        }
+        val selected = AudioStreamSelection.select(dash,enableDolby,enableHiRes,AudioStreamSelection::canDecode)
+        return selected.baseUrl to volume
     }
 
     fun getFirstCid(bvid: String, cookie: String?): Long {

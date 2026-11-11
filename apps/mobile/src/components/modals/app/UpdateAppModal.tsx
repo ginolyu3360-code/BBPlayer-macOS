@@ -12,6 +12,7 @@ import { Dialog, Text, useTheme } from 'react-native-paper'
 
 import Button from '@/components/common/Button'
 import { useModalStore } from '@/hooks/stores/useModalStore'
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import type { UpdateDownloads } from '@/lib/services/updateService'
 import { storage } from '@/utils/mmkv'
 import toast from '@/utils/toast'
@@ -39,6 +40,7 @@ export default function UpdateAppModal({
 	const [isUpdating, setIsUpdating] = useState(false)
 
 	const onUpdate = async () => {
+		if (isPersonalBuild) return
 		if (isUpdating) return
 		if (Platform.OS !== 'android') {
 			await openReleaseUrl()
@@ -85,6 +87,7 @@ export default function UpdateAppModal({
 	}
 
 	const openReleaseUrl = async () => {
+		if (isPersonalBuild) return
 		try {
 			if (url) await WebBrowser.openBrowserAsync(url)
 		} catch (e) {

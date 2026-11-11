@@ -23,6 +23,11 @@ import m0019 from './0019_icy_mandarin.sql'
 import m0020 from './0020_ambitious_sheva_callister.sql'
 import m0021 from './0021_heavy_next_avengers.sql'
 import m0022 from './0022_player_preference.sql'
+import m0023 from './0023_library_song_identity.sql'
+import m0024 from './0024_playlist_identity.sql'
+import m0025 from './0025_lan_sync_log.sql'
+import m0026 from './0026_synced_lyrics.sql'
+import m0027 from './0027_sync_pending_index.sql'
 import journal from './meta/_journal.json'
 
 export default {
@@ -51,5 +56,10 @@ export default {
 		m0020,
 		m0021,
 		m0022,
+		m0023,
+		m0024,
+		m0025,
+		m0026,
+		m0027,
 	},
 }

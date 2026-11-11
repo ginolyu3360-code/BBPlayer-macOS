@@ -64,3 +64,7 @@ Research references (README and selected source inspection only, not runtime ver
 ## Already implemented
 
 Basic read-only danmaku, complete floating-lyric text with overflow handling, and enlarged sidebar navigation were implemented in the follow-up iteration. Do not re-add them as missing features. Their remaining acceptance work is listed above. See `validation/iteration-20261023.json` for recorded checks.
+
+## 2026-11-11 implementation update
+
+The earlier numbered roadmap is historical. Stable source replacement, local originals, portable backups/merge, playback recovery, LAN synchronization/pairing/conflicts, mini player, lyric appearance and optional stream quality/EQ are now implemented in the personal dual-platform working tree. The remaining acceptance is physical devices/UI, real entitlements/decoding, network/proxy combinations, multi-display behavior and endurance; these checks are explicitly deferred. See the repository's `docs/personal-dual-platform.md` and the appended validation evidence. This is not a publication or installed-app update.

@@ -1,6 +1,7 @@
 package expo.modules.orpheus.service
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -14,6 +15,14 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.AudioOffloadSupport
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.ForwardingAudioSink
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import expo.modules.orpheus.audio.EqualizerAudioProcessor
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -25,6 +34,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import expo.modules.orpheus.recovery.PlaybackWatchdog
 import expo.modules.orpheus.R
 import expo.modules.orpheus.manager.FloatingLyricsManager
 import expo.modules.orpheus.manager.LyricsConsumer
@@ -70,6 +80,7 @@ class OrpheusMusicService : MediaLibraryService() {
     lateinit var shuffleManager: ShuffleManager
     lateinit var lyricsManager: UnifiedLyricsManager
     private var currentMediaId: String? = null
+    private var playbackWatchdog: PlaybackWatchdog? = null
     private val json = Json { ignoreUnknownKeys = true }
 
     private val lyricsUpdateRunnable = object : Runnable {
@@ -227,14 +238,74 @@ class OrpheusMusicService : MediaLibraryService() {
      * 可多次调用，每次调用前应确保旧 player 已释放或为 null。
      */
     @OptIn(UnstableApi::class)
+    private var equalizerProcessor: EqualizerAudioProcessor? = null
+
+    internal fun tryFallbackAudio(error: androidx.media3.common.PlaybackException): Boolean {
+        if (error.errorCode !in 3000..4999) return false
+        val current = player ?: return false
+        val item = current.currentMediaItem ?: return false
+        val uri = item.localConfiguration?.uri ?: return false
+        if (uri.scheme != "orpheus" || uri.host != "bilibili" ||
+            (uri.getQueryParameter("hires") != "1" && uri.getQueryParameter("dolby") != "1")) return false
+        serviceHandler.post {
+            if (current.currentMediaItem !== item) return@post
+            val next = uri.buildUpon().clearQuery()
+                .appendQueryParameter("bvid", uri.getQueryParameter("bvid"))
+            uri.getQueryParameter("cid")?.let { next.appendQueryParameter("cid", it) }
+            next.appendQueryParameter("hires","0").appendQueryParameter("dolby","0").appendQueryParameter("fallback","1")
+            val index = current.currentMediaItemIndex
+            val position = current.currentPosition.coerceAtLeast(0)
+            val intent = current.playWhenReady
+            current.replaceMediaItem(index, item.buildUpon().setUri(next.build()).build())
+            current.seekTo(index, position); current.prepare(); current.playWhenReady = intent
+        }
+        return true
+    }
+
+    @OptIn(UnstableApi::class)
+    internal fun refreshEqualizerRoute() {
+        val current = player ?: return
+        if (GeneralStorage.equalizer().enabled && equalizerProcessor?.status != 1 && current.mediaItemCount > 0) {
+            val index = current.currentMediaItemIndex
+            val position = current.currentPosition.coerceAtLeast(0)
+            val intent = current.playWhenReady
+            val parameters = current.playbackParameters
+            current.stop()
+            current.seekTo(index, position)
+            current.playbackParameters = parameters
+            current.prepare()
+            current.playWhenReady = intent
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    internal fun equalizerStatus(): Int = equalizerProcessor?.status ?: 0
+
+    @OptIn(UnstableApi::class)
     private fun initializePlayer() {
         val dataSourceFactory = DownloadUtil.getPlayerDataSourceFactory(this)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(dataSourceFactory)
 
-        val renderersFactory = DefaultRenderersFactory(this)
-            .experimentalSetMediaCodecAsyncCryptoFlagEnabled(false)
+        val equalizer = EqualizerAudioProcessor().also { equalizerProcessor = it }
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParameters: Boolean): AudioSink {
+                val sink = DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf<AudioProcessor>(equalizer))
+                    .setEnableFloatOutput(false)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters)
+                    .build()
+                return object : ForwardingAudioSink(sink) {
+                    override fun getFormatSupport(format: Format): Int =
+                        if (GeneralStorage.equalizer().enabled && format.sampleMimeType != MimeTypes.AUDIO_RAW)
+                            AudioSink.SINK_FORMAT_UNSUPPORTED else super.getFormatSupport(format)
+                    override fun supportsFormat(format: Format): Boolean = getFormatSupport(format) != AudioSink.SINK_FORMAT_UNSUPPORTED
+                    override fun getFormatOffloadSupport(format: Format): AudioOffloadSupport =
+                        if (GeneralStorage.equalizer().enabled) AudioOffloadSupport.DEFAULT_UNSUPPORTED else super.getFormatOffloadSupport(format)
+                }
+            }
+        }.experimentalSetMediaCodecAsyncCryptoFlagEnabled(false)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -270,6 +341,7 @@ class OrpheusMusicService : MediaLibraryService() {
         )
 
         setupListeners()
+        playbackWatchdog = PlaybackWatchdog(this, player!!).also { it.start() }
 
         var launchIntent = packageManager.getLaunchIntentForPackage(packageName)
 
@@ -322,6 +394,7 @@ class OrpheusMusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        playbackWatchdog?.close(); playbackWatchdog = null
         serviceHandler.removeCallbacks(lyricsUpdateRunnable)
         serviceHandler.removeCallbacks(resumeSaveRunnable)
         saveCurrentResumeRecord()

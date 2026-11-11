@@ -14,4 +14,6 @@
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHumanReadableCopyright</key><string>BBPlayer contributors</string>
+<key>NSLocalNetworkUsageDescription</key><string>与已配对的个人设备同步歌单、喜欢和手动歌词，不上传到互联网。</string>
+<key>NSBonjourServices</key><array><string>_bbplayer-sync._tcp</string></array>
 </dict></plist>

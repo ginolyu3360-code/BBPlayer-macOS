@@ -321,8 +321,10 @@ final class StreamingTests: XCTestCase {
             if mode == "expiry" { try await Task.sleep(for: .milliseconds(1300)) }
             engine.next(); _ = try await waitForClock(engine)
             XCTAssertEqual(engine.currentTrack?.id, expected)
-            let count = await provider.resolved.count
-            XCTAssertEqual(count, mode == "expiry" ? 3 : 2)
+            // A subsequent next-track prefetch may finish while waiting for the clock.
+            // Count only this selected source to verify expiry/reuse independently of host load.
+            let resolvedAfterSwitch = await provider.resolved
+            XCTAssertEqual(resolvedAfterSwitch.filter { $0 == expected }.count, mode == "expiry" ? 2 : 1)
             engine.shutdown()
         }
     }

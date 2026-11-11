@@ -1,6 +1,9 @@
 import type { Result } from 'neverthrow'
 
+import type { LyricPresentation } from '@/lib/config/lyricPresentation'
+
 interface Settings {
+	lyricPresentation?: LyricPresentation
 	defaultPlayerMode: 'music' | 'podcast'
 	sendPlayHistory: boolean
 	enableDebugLog: boolean

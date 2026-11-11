@@ -17,6 +17,7 @@ import { alert } from '@/components/modals/AlertModal'
 import { SyncFailuresSheet } from '@/features/playlist/local/components/SyncFailuresSheet'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { useModalStore } from '@/hooks/stores/useModalStore'
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import db, { expoDb } from '@/lib/db/db'
 import * as schema from '@/lib/db/schema'
 import { sharedPlaylistFacade } from '@/lib/facades/sharedPlaylist'
@@ -78,6 +79,7 @@ export default function TestPage() {
 	const [queryDate, setQueryDate] = useState('')
 
 	const testCheckUpdate = async () => {
+		if (isPersonalBuild) return
 		setLoading(true)
 		try {
 			const result = await Updates.checkForUpdateAsync()
@@ -93,6 +95,7 @@ export default function TestPage() {
 	}
 
 	const testUpdatePackage = async () => {
+		if (isPersonalBuild) return
 		setLoading(true)
 		try {
 			if (isUpdatePending) {

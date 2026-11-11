@@ -24,6 +24,7 @@ import useSmoothProgress from '@/hooks/player/useSmoothProgress'
 import { lyricsQueryKeys, useSmartFetchLyrics } from '@/hooks/queries/lyrics'
 import useAppStore from '@/hooks/stores/useAppStore'
 import { useModalStore } from '@/hooks/stores/useModalStore'
+import { normalizedLyricPresentation } from '@/lib/config/lyricPresentation'
 import { queryClient } from '@/lib/config/queryClient'
 import lyricService from '@/lib/services/lyricService'
 import { toastAndLogError } from '@/utils/error-handling'
@@ -45,6 +46,9 @@ const Lyrics = memo(function Lyrics({
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const colors = useTheme().colors
+	const presentation = normalizedLyricPresentation(
+		useAppStore((state) => state.settings.lyricPresentation),
+	)
 	const isFluidBackground = useAppStore(
 		(state) => state.settings.playerBackgroundStyle === 'fluid',
 	)
@@ -348,41 +352,45 @@ const Lyrics = memo(function Lyrics({
 				<MaskedView
 					style={{ flex: 1 }}
 					maskElement={
-						<View
-							style={{ flex: 1 }}
-							pointerEvents='none'
-						>
-							<LinearGradient
-								style={[styles.gradient]}
-								start={{ x: 0, y: 0 }}
-								end={{ x: 0, y: 1 }}
-								colors={['transparent', colors.background]}
-								locations={[0, 1]}
-							/>
-
+						presentation.edgeMask ? (
 							<View
-								style={{
-									flex: 1,
-									backgroundColor: colors.background,
-								}}
-							/>
+								style={{ flex: 1 }}
+								pointerEvents='none'
+							>
+								<LinearGradient
+									style={[styles.gradient]}
+									start={{ x: 0, y: 0 }}
+									end={{ x: 0, y: 1 }}
+									colors={['transparent', colors.background]}
+									locations={[0, 1]}
+								/>
 
-							<LinearGradient
-								style={[
-									styles.gradient,
-									isFluidBackground && {
-										height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
-									},
-								]}
-								start={{ x: 0, y: 0 }}
-								end={{ x: 0, y: 1 }}
-								colors={[colors.background, 'transparent']}
-								locations={[
-									0,
-									isFluidBackground ? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT : 1,
-								]}
-							/>
-						</View>
+								<View
+									style={{
+										flex: 1,
+										backgroundColor: colors.background,
+									}}
+								/>
+
+								<LinearGradient
+									style={[
+										styles.gradient,
+										isFluidBackground && {
+											height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
+										},
+									]}
+									start={{ x: 0, y: 0 }}
+									end={{ x: 0, y: 1 }}
+									colors={[colors.background, 'transparent']}
+									locations={[
+										0,
+										isFluidBackground ? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT : 1,
+									]}
+								/>
+							</View>
+						) : (
+							<View style={{ flex: 1, backgroundColor: 'black' }} />
+						)
 					}
 				>
 					{renderLyrics()}

@@ -12,11 +12,12 @@ import expoRouter from 'expo-router/plugin'
 import expoSharing from 'expo-sharing/plugin'
 import expoSqlite from 'expo-sqlite/plugin'
 import expoWebBrowser from 'expo-web-browser/plugin'
-import type { ConfigContext, ExpoConfig } from 'expo/config'
+import type { ExpoConfig } from 'expo/config'
 import bootsplash from 'react-native-bootsplash/expo'
 
 import bootSplashColors from './boot-splash-colors.json'
 import { version } from './package.json'
+import { applyPersonalBuildConfig } from './personal-build.js'
 
 const IS_DEV = process.env.APP_VARIANT === 'development'
 const IS_PREVIEW = process.env.APP_VARIANT === 'preview'
@@ -86,8 +87,7 @@ const getGoogleServicesFile = (defaultPath: string, realPath: string) => {
 	return defaultPath
 }
 
-// oxlint-disable-next-line @typescript-eslint/no-unused-vars
-export default ({ config }: ConfigContext): ExpoConfig => {
+export default (): ExpoConfig => {
 	const googleServicesJsonPath =
 		'./assets/config/google-services/google-services.json'
 	const googleServicesJsonRealPath =
@@ -97,7 +97,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 	const googleServicesPlistRealPath =
 		'./assets/config/google-services/GoogleService-Info.real.plist'
 
-	return {
+	const config: ExpoConfig = {
 		name: getAppName(),
 		slug: 'bbplayer',
 		version: version,
@@ -323,4 +323,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 			},
 		},
 	}
+	return process.env.APP_VARIANT === 'personal'
+		? applyPersonalBuildConfig(config)
+		: config
 }

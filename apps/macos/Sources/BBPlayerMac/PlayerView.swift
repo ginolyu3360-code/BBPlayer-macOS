@@ -119,22 +119,23 @@ struct PlayerView: View {
 }
 struct LyricScrollView: View {
     @Bindable var model: AppModel
+    private var presentation: LyricPresentation { (model.player.preferences.lyricPresentation ?? LyricPresentation()).normalized }
     private var position: Double { model.player.position + model.player.preferences.lyricOffset }
     private var index: Int? { model.player.lyrics.index(at: position) }
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: presentation.spacing) {
                     if model.player.lyrics.lines.isEmpty { ContentUnavailableView("暂无歌词", systemImage: "text.quote", description: Text(model.lyricMessage ?? "正在寻找歌词，也可以手动匹配。")).frame(maxWidth: .infinity, minHeight: 220) }
                     ForEach(Array(model.player.lyrics.lines.enumerated()), id: \.offset) { i, line in
                         VStack(alignment: .leading, spacing: 6) {
-                            WordLine(line: line, position: position + model.player.lyrics.offset, active: i == index).font(.system(size: i == index ? 25 : 21, weight: .bold))
-                            if model.player.preferences.showRomanization, let roman = line.romanization { Text(roman).font(.subheadline).foregroundStyle(.secondary) }
-                            if model.player.preferences.showTranslation, let translation = line.translation { Text(translation).font(.subheadline).foregroundStyle(.secondary) }
+                            WordLine(line: line, position: position + model.player.lyrics.offset, active: i == index, accent: presentation.accent).font(.system(size: presentation.fontSize * (i == index ? 1 : 0.84), weight: .bold))
+                            if model.player.preferences.showRomanization, let roman = line.romanization { Text(roman).font(.system(size: presentation.fontSize * presentation.translationRatio)).foregroundStyle(.secondary) }
+                            if model.player.preferences.showTranslation, let translation = line.translation { Text(translation).font(.system(size: presentation.fontSize * presentation.translationRatio)).foregroundStyle(.secondary) }
                         }.opacity(i == index ? 1 : 0.42).frame(maxWidth: .infinity, alignment: .leading).id(i).contentShape(Rectangle()).onTapGesture { model.player.seek(to: max(0, line.start - model.player.lyrics.offset - model.player.preferences.lyricOffset)) }
                     }
                 }.padding(.vertical, 80).padding(.horizontal, 12)
-            }.scrollIndicators(.hidden).onChange(of: index) { _, value in if let value { withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(value, anchor: .center) } } }
+            }.mask(LinearGradient(colors: presentation.edgeMask ? [.clear,.black,.black,.clear] : [.black,.black,.black,.black], startPoint: .top, endPoint: .bottom)).scrollIndicators(.hidden).onChange(of: index) { _, value in if let value { withAnimation(.easeInOut(duration: 0.35)) { proxy.scrollTo(value, anchor: .center) } } }
         }
     }
 }
@@ -142,12 +143,13 @@ struct WordLine: View {
     let line: LyricLine
     let position: Double
     let active: Bool
+    var accent = true
     var body: some View {
         if line.words.isEmpty || !active { Text(line.text).foregroundStyle(active ? Color.primary : .secondary) }
         else {
             line.words.reduce(Text("")) { result, word in
                 let fraction = max(0, min(1, (position - word.start) / max(0.01, word.end - word.start)))
-                return result + Text(word.text).foregroundColor(fraction >= 1 ? .primary : fraction > 0 ? MD.accent : .secondary.opacity(0.55))
+                return result + Text(word.text).foregroundColor(fraction >= 1 ? .primary : fraction > 0 ? (accent ? MD.accent : .primary) : .secondary.opacity(0.55))
             }
         }
     }

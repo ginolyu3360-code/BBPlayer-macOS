@@ -17,6 +17,7 @@ import { Text } from 'react-native-paper'
 import { Toaster } from 'sonner-native'
 
 import AnimatedBootSplash from '@/components/AnimatedBootSplash'
+import InitialLANSyncGuard from '@/components/InitialLANSyncGuard'
 import { alert } from '@/components/modals/AlertModal'
 import PlayerQueueModal from '@/components/modals/PlayerQueueModal'
 import NowPlayingBar from '@/components/NowPlayingBar'
@@ -34,6 +35,8 @@ import { serializeCookieObject } from '@/hooks/stores/useAppStore'
 import useAppStoreObj from '@/hooks/stores/useAppStore'
 import { initPlayerQueueStore } from '@/hooks/stores/usePlayerQueueStore'
 import { usePlayerStore } from '@/hooks/stores/usePlayerStore'
+import { createDailyBackup } from '@/lib/backup/automatic'
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import { initializeSentry } from '@/lib/config/sentry'
 import drizzleDb from '@/lib/db/db'
 import { playerSideEffects } from '@/lib/player/PlayerSideEffects'
@@ -44,6 +47,7 @@ import {
 	reportUpdateActivity,
 	reportUpdateLaunch,
 } from '@/lib/services/updateTelemetry'
+import { startLANScheduler } from '@/lib/sync/client'
 import { playlistSyncWorker } from '@/lib/workers/PlaylistSyncWorker'
 import { ProjectScope } from '@/types/core/scope'
 import log, { cleanOldLogFiles, reportErrorToSentry } from '@/utils/log'
@@ -55,7 +59,8 @@ import migrations from '../../drizzle/migrations'
 const logger = log.extend('UI.RootLayout')
 
 Observe.configure({
-	dispatchingEnabled: useAppStoreObj.getState().settings.enableDataCollection,
+	dispatchingEnabled:
+		!isPersonalBuild && useAppStoreObj.getState().settings.enableDataCollection,
 	integrations: { 'expo-router': true },
 })
 
@@ -145,6 +150,9 @@ function RootLayout() {
 	const [isReady, setIsReady] = useState(false)
 	const { success: migrationsSuccess, error: migrationsError } =
 		useFastMigrations(drizzleDb, migrations)
+	useEffect(() => {
+		if (migrationsSuccess) return startLANScheduler()
+	}, [migrationsSuccess])
 	useCheckUpdate()
 	useFeatureTracking()
 
@@ -184,7 +192,7 @@ function RootLayout() {
 	}, [])
 
 	useEffect(() => {
-		if (__DEV__ || !Updates.isEnabled) {
+		if (isPersonalBuild || __DEV__ || !Updates.isEnabled) {
 			return
 		}
 
@@ -209,6 +217,9 @@ function RootLayout() {
 	useEffect(() => {
 		if (isReady && migrationsSuccess) {
 			reportUpdateLaunch()
+			void createDailyBackup().catch((error: unknown) =>
+				logger.error('自动备份失败', { error }),
+			)
 			// 恢复上次被中断的同步任务（syncing → pending），并触发同步
 			playlistSyncWorker.recoverStuckRows().catch((error) => {
 				logger.error('恢复同步任务失败:', error)
@@ -440,6 +451,7 @@ function RootLayout() {
 					</Stack>
 				) : null}
 				<Toaster />
+				<InitialLANSyncGuard />
 				<PlayerQueueModal />
 				<NowPlayingBar />
 			</AppProviders>

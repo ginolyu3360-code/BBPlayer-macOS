@@ -6,6 +6,7 @@ import * as Updates from 'expo-updates'
 import { Platform } from 'react-native'
 
 import useAppStore from '@/hooks/stores/useAppStore'
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import { configuredChannel } from '@/lib/services/updateTelemetry'
 import log from '@/utils/log'
 
@@ -66,6 +67,7 @@ logger.info(
 )
 
 export function initializeSentry() {
+	if (isPersonalBuild) return
 	Sentry.init({
 		dsn: 'https://893ea8eb3743da1e065f56b3aa5e96f9@o4508985265618944.ingest.us.sentry.io/4508985267191808',
 		debug: false,

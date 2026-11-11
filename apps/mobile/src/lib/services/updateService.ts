@@ -4,6 +4,8 @@ import Constants from 'expo-constants'
 import { err, ok, type Result } from 'neverthrow'
 import { fetch, prefetchOnAppStart } from 'react-native-nitro-fetch'
 
+import { isPersonalBuild } from '@/lib/config/personalBuild'
+
 const UPDATE_PREFETCH_KEY = 'update-manifest'
 
 export interface ReleaseInfo {
@@ -35,6 +37,7 @@ export function registerUpdatePrefetch(): void {
 }
 
 const getManifestUrl = (): string | undefined => {
+	if (isPersonalBuild) return undefined
 	const extra = Constants?.expoConfig?.extra as
 		| { updateManifestUrl?: string }
 		| undefined

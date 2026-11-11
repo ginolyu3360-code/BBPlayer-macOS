@@ -19,9 +19,13 @@ import {
 	qqMusicApi as qqMusicApiInstance,
 	type QQMusicApi,
 } from '@/lib/api/qqmusic/api'
+import { expoDb, libraryRestoreGate } from '@/lib/db/db'
 import type { CustomError } from '@/lib/errors'
 import { FileSystemError, LyricNotFoundError } from '@/lib/errors'
 import { trackService } from '@/lib/services/trackService'
+import { saveManualLyrics } from '@/lib/sync/localRecording'
+import { mobileLyrics, wireLyrics } from '@/lib/sync/lyrics'
+import type { SyncLyrics } from '@/lib/sync/protocol'
 import type { BilibiliTrack, Track } from '@/types/core/media'
 import type {
 	LyricFileData,
@@ -183,6 +187,18 @@ class LyricService {
 	public smartFetchLyrics(
 		track: Track,
 	): ResultAsync<LyricFileData, CustomError> {
+		libraryRestoreGate.assertReady()
+		const synced = expoDb.getFirstSync<{ payload: string }>(
+			'SELECT payload FROM sync_lyric WHERE source_key=?',
+			[track.uniqueKey],
+		)
+		if (synced) {
+			const document = JSON.parse(synced.payload) as SyncLyrics
+			return okAsync({
+				...mobileLyrics(document, track.uniqueKey),
+				manualSkip: document.source === 'manual-skip',
+			})
+		}
 		const lyricFile = new FileSystem.File(
 			FileSystem.Paths.document,
 			'lyrics',
@@ -301,30 +317,55 @@ class LyricService {
 			updateTime: Date.now(),
 		}
 		logger.info('网络搜索歌词完成，正在写入缓存')
-		return this.saveLyricsToFile(lyricFileData, track.uniqueKey)
+		return this.saveLyricsToFile(lyricFileData, track.uniqueKey, false)
 	}
 
 	public saveLyricsToFile(
 		lyrics: LyricFileData,
 		uniqueKey: string,
+		manual = true,
 	): ResultAsync<LyricFileData, FileSystemError> {
 		try {
+			libraryRestoreGate.assertReady()
+			if (!manual) {
+				const chosen = expoDb.getFirstSync<{ payload: string }>(
+					'SELECT payload FROM sync_lyric WHERE source_key=?',
+					[uniqueKey],
+				)
+				if (chosen) {
+					const document = JSON.parse(chosen.payload) as SyncLyrics
+					return okAsync({
+						...mobileLyrics(document, uniqueKey),
+						manualSkip: document.source === 'manual-skip',
+					})
+				}
+			}
+			const toWrite: LyricFileData = lyrics.manualSkip
+				? lyrics
+				: { ...lyrics, manualSkip: false }
+			let authoritative = false
+			if (manual) {
+				const document = wireLyrics(toWrite)
+				if (toWrite.manualSkip) document.source = 'manual-skip'
+				authoritative = saveManualLyrics(expoDb, uniqueKey, document)
+			}
 			const lyricFile = new FileSystem.File(
 				FileSystem.Paths.document,
 				'lyrics',
 				`${uniqueKey.replaceAll('::', '--')}.json`,
 			)
-			lyricFile.parentDirectory.create({
-				intermediates: true,
-				idempotent: true,
-			})
-			// 当用户主动提供歌词内容时，清除 manualSkip 标记
-			const toWrite: LyricFileData = lyrics.manualSkip
-				? lyrics
-				: { ...lyrics, manualSkip: false }
-			Sentry.startSpan({ name: 'io:file:write', op: 'io' }, () =>
-				lyricFile.write(JSON.stringify(toWrite)),
-			)
+			try {
+				lyricFile.parentDirectory.create({
+					intermediates: true,
+					idempotent: true,
+				})
+				Sentry.startSpan({ name: 'io:file:write', op: 'io' }, () =>
+					lyricFile.write(JSON.stringify(toWrite)),
+				)
+			} catch (error) {
+				if (!authoritative) throw error
+				logger.warning('歌词已保存到资料库，文件缓存未写入', error)
+			}
 			// 自动同步到悬浮窗/状态栏
 			void this.pushLyricsToOverlays(uniqueKey)
 			return okAsync(toWrite)
@@ -470,7 +511,7 @@ class LyricService {
 					}
 
 					// oxlint-disable-next-line no-await-in-loop
-					await this.saveLyricsToFile(newLyricData, uniqueKey)
+					await this.saveLyricsToFile(newLyricData, uniqueKey, false)
 				} catch (e) {
 					logger.warning(`文件 ${file.name} 迁移失败`, e)
 				}
@@ -519,6 +560,7 @@ class LyricService {
 		)
 
 		return Result.fromThrowable(() => {
+			libraryRestoreGate.assertReady()
 			if (!lyricsDir.exists) {
 				logger.debug('歌词目录不存在，无需清理')
 				return true as const

@@ -5,6 +5,10 @@ import Observation
 
 @MainActor @Observable final class AppModel {
     let database: LibraryDatabase
+    let backups: LibraryBackup
+    @ObservationIgnored var sync: SyncEngine?
+    @ObservationIgnored lazy var compactPlayer = CompactPlayerController(model: self)
+    @ObservationIgnored lazy var lan = LANSyncController(model: self)
     let api: BilibiliClient
     let cache: AudioCache
     var player: NativePlaybackEngine
@@ -29,6 +33,8 @@ import Observation
     var page = 1
     var hasMore = false
     var busy = false
+    var isRestoringLibrary = false
+    var localFilesRevision = 0
     var message: String?
     var lyricMessage: String?
     var showPlayer = false
@@ -48,11 +54,16 @@ import Observation
     @ObservationIgnored private var routeTask: Task<Void, Never>?
     @ObservationIgnored private var lyricTask: Task<Void, Never>?
     @ObservationIgnored private var importTask: Task<Void, Never>?
+    @ObservationIgnored private var importFetchTask: Task<Void, Never>?
+    @ObservationIgnored private var lyricChoiceTask: Task<Void, Never>?
+    @ObservationIgnored private var libraryEpoch = UUID()
     @ObservationIgnored private var routeID = UUID()
 
     init(dataRoot: URL? = nil, bilibiliClient: BilibiliClient? = nil) throws {
         let root = try dataRoot ?? QAOptions.dataRoot ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("com.bbplayer.macos", isDirectory: true)
         database = try LibraryDatabase(url: root.appendingPathComponent("library.sqlite"))
+        backups = LibraryBackup(library: database)
+        sync = try SyncEngine.activate(library: database)
         api = bilibiliClient ?? BilibiliClient()
         cache = try AudioCache(root: root.appendingPathComponent("stream-cache"))
         player = NativePlaybackEngine(provider: api, database: database, cache: cache)
@@ -68,6 +79,9 @@ import Observation
     }
     func start() async {
         guard !QAOptions.enabled else { updateVisibility(); return }
+        do { let backups = backups; _ = try await Task.detached { try backups.automaticIfNeeded() }.value }
+        catch { message = "自动备份未完成：" + error.localizedDescription }
+        if UserDefaults.standard.bool(forKey: "lan-sync-enabled") { lan.enable(allowInteraction: false) }
         await restoreLogin(allowInteraction: false)
         updateVisibility()
     }
@@ -80,12 +94,60 @@ import Observation
             else { message = error.localizedDescription }
         }
     }
+    /// The restore sheet prevents new UI edits while these existing writers drain.
+    func restoreLibrary(_ prepared: PreparedLibraryRestore, merge: Bool = false, preferImportedMetadata: Bool = false) async throws {
+        guard !isRestoringLibrary else { throw APIError.unavailable("资料恢复正在进行，请稍候。") }
+        lan.stop()
+        isRestoringLibrary = true
+        defer { isRestoringLibrary = false }
+        libraryEpoch = UUID()
+        let pendingRoute = routeTask, pendingLyrics = lyricTask, pendingImport = importTask
+        let pendingFetch = importFetchTask, pendingChoice = lyricChoiceTask
+        pendingRoute?.cancel(); pendingLyrics?.cancel(); pendingImport?.cancel()
+        pendingFetch?.cancel(); pendingChoice?.cancel()
+        routeID = UUID()
+        downloads.pauseAll()
+        player.endPreview(); player.shutdown()
+        // Media commands now address an empty engine while the library is replaced.
+        player = NativePlaybackEngine(provider: api, database: database, cache: cache, restore: false, writesSuspended: true)
+        await pendingRoute?.value; await pendingLyrics?.value; await pendingImport?.value
+        await pendingFetch?.value; await pendingChoice?.value
+        busy = false
+        do {
+            let backups = backups
+            try await Task.detached {
+                if merge { try backups.merge(prepared, preferImportedMetadata: preferImportedMetadata) }
+                else { try backups.restore(prepared) }
+            }.value
+        } catch {
+            player.shutdown()
+            player = NativePlaybackEngine(provider: api, database: database, cache: cache, allowAutoplay: false)
+            connectPlayerCallbacks()
+            throw error
+        }
+        sync = nil
+        player.completeLibraryRestore(preferences: (try? database.state(PlayerPreferences.self, key: "preferences")) ?? PlayerPreferences())
+        connectPlayerCallbacks()
+        importJob = nil; importRunning = false; deletedPlaylist = nil
+        localPlaylists = (try? database.playlists()) ?? []
+        summary = try? database.summary()
+        historyEvents = []; historyDate = nil; openedPlaylist = nil
+        tracks = []; playlists = []; section = .playlists
+        isRestoringLibrary = false
+        loadSection()
+    }
+    private func connectPlayerCallbacks() {
+        player.onTrackChanged = { [weak self] track in self?.loadLyrics(track) }
+        player.onError = { [weak self] error in self?.message = error.localizedDescription }
+    }
     func navigate(_ destination: LibrarySection) {
+        guard !isRestoringLibrary else { return }
         playlistQuery = ""; historyDate = nil; historyEvents = []
         section = destination; followedUploader = nil; openedPlaylist = nil; page = 1; tracks = []; playlists = []; following = []
         loadSection()
     }
     func loadSection(more: Bool = false) {
+        guard !isRestoringLibrary else { return }
         routeTask?.cancel(); let token = UUID(); routeID = token; busy = true
         if !more { page = 1 }
         routeTask = Task { [weak self] in
@@ -128,9 +190,10 @@ import Observation
             catch { if routeID == token { message = error.localizedDescription } }
         }
     }
-    func open(_ playlist: Playlist) { playlistQuery = ""; openedPlaylist = playlist; tracks = []; page = 1; loadSection() }
-    func loadMore() { guard hasMore, !busy else { return }; page += 1; loadSection(more: true) }
+    func open(_ playlist: Playlist) { guard !isRestoringLibrary else { return }; playlistQuery = ""; openedPlaylist = playlist; tracks = []; page = 1; loadSection() }
+    func loadMore() { guard !isRestoringLibrary, hasMore, !busy else { return }; page += 1; loadSection(more: true) }
     func play(_ track: Track) {
+        guard !isRestoringLibrary else { return }
         if let playlist = openedPlaylist, playlist.kind == "local" {
             do {
                 let all = try database.playlistTracks(playlistID: playlist.id, query: playlistQuery)
@@ -143,6 +206,7 @@ import Observation
         else { player.setQueue([track]) }
     }
     func collectionTracks() throws -> [Track] {
+        guard !isRestoringLibrary else { throw APIError.unavailable("资料恢复正在进行，请稍候。") }
         if let playlist = openedPlaylist, playlist.kind == "local" { return try database.playlistTracks(playlistID: playlist.id, query: playlistQuery) }
         return tracks
     }
@@ -158,8 +222,9 @@ import Observation
         do { downloads.add(try collectionTracks()) }
         catch { message = error.localizedDescription }
     }
-    func selectHistoryDate(_ date: Date?) { historyDate = date; historyEvents = []; tracks = []; loadSection() }
+    func selectHistoryDate(_ date: Date?) { guard !isRestoringLibrary else { return }; historyDate = date; historyEvents = []; tracks = []; loadSection() }
     func createPlaylist(_ title: String) {
+        guard !isRestoringLibrary else { return }
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         do { try database.savePlaylist(Playlist(title: title), tracks: []); localPlaylists = try database.playlists(); if section == .playlists { loadSection() } }
         catch { message = error.localizedDescription }
@@ -168,10 +233,12 @@ import Observation
         add([track], to: playlist)
     }
     func add(_ tracks: [Track], to playlist: Playlist) {
+        guard !isRestoringLibrary else { return }
         do { try database.append(tracks, to: playlist.id); localPlaylists = try database.playlists(); if openedPlaylist?.id == playlist.id { loadSection() } }
         catch { message = error.localizedDescription }
     }
     func deletePlaylist(_ playlist: Playlist) {
+        guard !isRestoringLibrary else { return }
         do {
             try database.deletePlaylist(playlist.id)
             deletedPlaylist = try database.deletedPlaylist()
@@ -181,6 +248,7 @@ import Observation
         catch { message = error.localizedDescription }
     }
     func undoPlaylistDeletion() {
+        guard !isRestoringLibrary else { return }
         do {
             try database.restoreDeletedPlaylist()
             deletedPlaylist = nil
@@ -190,15 +258,19 @@ import Observation
         catch { message = error.localizedDescription }
     }
     func remove(_ track: Track, from playlist: Playlist) {
+        guard !isRestoringLibrary else { return }
         do { try database.removeTrack(track.id, from: playlist.id); loadSection() }
         catch { message = error.localizedDescription }
     }
     func expandPages(_ track: Track) {
+        guard !isRestoringLibrary else { return }
         routeTask?.cancel(); busy = true
+        let epoch = libraryEpoch
         routeTask = Task { [weak self] in
             guard let self else { return }; defer { busy = false }
             do {
                 let result = try await api.pages(track); try Task.checkCancellation()
+                guard !isRestoringLibrary, libraryEpoch == epoch else { return }
                 var remembered = (try database.state([Track].self, key: "multipart")) ?? []
                 if !remembered.contains(where: { $0.bvid == track.bvid }) { remembered.append(track); try database.saveState(remembered, key: "multipart") }
                 section = .multipart; openedPlaylist = nil; tracks = result; playlists = []; hasMore = false
@@ -206,6 +278,7 @@ import Observation
         }
     }
     func openFollowing(_ person: FollowingProfile) {
+        guard !isRestoringLibrary else { return }
         followedUploader = person; openedPlaylist = nil; tracks = []; following = []; page = 1; loadSection()
     }
     func login(cookie: String) async throws {
@@ -223,43 +296,74 @@ import Observation
         catch { message = error.localizedDescription }
     }
     func loadLyrics(_ track: Track) {
+        guard !isRestoringLibrary else { return }
         lyricTask?.cancel(); player.setLyrics(LyricDocument()); lyricMessage = nil
         lyricTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let document: LyricDocument
                 if let cached = try database.lyrics(trackID: track.id) { document = cached }
-                else { document = try await music.automaticLyrics(for: track); try database.saveLyrics(document, trackID: track.id) }
+                else { document = try await music.automaticLyrics(for: track); try Task.checkCancellation(); try database.saveLyrics(document, trackID: track.id, synchronize: false) }
                 try Task.checkCancellation(); guard player.currentTrack?.id == track.id else { return }
                 player.setLyrics(document)
             } catch is CancellationError { } catch { if player.currentTrack?.id == track.id { lyricMessage = error.localizedDescription } }
         }
     }
     func applyLyrics(_ document: LyricDocument) throws {
+        guard !isRestoringLibrary else { throw APIError.unavailable("资料恢复正在进行，请稍候。") }
         guard let track = player.currentTrack else { return }
-        try database.saveLyrics(document, trackID: track.id); player.setLyrics(document); lyricMessage = nil
+        try database.saveLyrics(document, trackID: track.id, track: track); player.setLyrics(document); lyricMessage = nil
     }
     func adjustLyricOffset(_ delta: Double) {
+        guard !isRestoringLibrary else { return }
         var document = player.lyrics; document.offset += delta
         do { try applyLyrics(document) } catch { message = error.localizedDescription }
     }
     func searchLyrics(_ query: String) async {
-        do { lyricCandidates = try await music.searchLyrics(query, source: lyricSource) }
-        catch { message = error.localizedDescription }
+        guard !isRestoringLibrary else { return }
+        let epoch = libraryEpoch
+        do {
+            let results = try await music.searchLyrics(query, source: lyricSource)
+            guard !Task.isCancelled, !isRestoringLibrary, libraryEpoch == epoch else { return }
+            lyricCandidates = results
+        } catch { if libraryEpoch == epoch && !isRestoringLibrary { message = error.localizedDescription } }
     }
     func chooseLyrics(_ candidate: LyricCandidate) async {
-        do { try applyLyrics(try await music.lyrics(candidate)) } catch { message = error.localizedDescription }
+        guard !isRestoringLibrary, let trackID = player.currentTrack?.id else { return }
+        let epoch = libraryEpoch
+        lyricChoiceTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let document = try await music.lyrics(candidate)
+                try Task.checkCancellation()
+                guard !isRestoringLibrary, libraryEpoch == epoch, player.currentTrack?.id == trackID else { return }
+                try applyLyrics(document)
+            } catch { if libraryEpoch == epoch && !isRestoringLibrary && !Task.isCancelled { message = error.localizedDescription } }
+        }
+        lyricChoiceTask = task
+        await task.value
     }
     func beginImport(input: String, source: String) async {
-        guard !importRunning else { return }
-        busy = true; defer { busy = false }
-        do {
-            let (title, songs) = try await music.fetchPlaylist(input: input, source: source)
-            importJob = ImportJob(title: title, matches: songs.map { ImportMatch(song: $0) }); persistImport(); resumeImport()
-        } catch { message = error.localizedDescription }
+        guard !isRestoringLibrary, !importRunning else { return }
+        let epoch = libraryEpoch
+        importFetchTask?.cancel()
+        busy = true
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { if libraryEpoch == epoch { busy = false } }
+            do {
+                let (title, songs) = try await music.fetchPlaylist(input: input, source: source)
+                try Task.checkCancellation()
+                guard !isRestoringLibrary, libraryEpoch == epoch else { return }
+                importJob = ImportJob(title: title, matches: songs.map { ImportMatch(song: $0) }); persistImport(); resumeImport()
+            } catch { if libraryEpoch == epoch && !isRestoringLibrary && !Task.isCancelled { message = error.localizedDescription } }
+        }
+        importFetchTask = task
+        await task.value
     }
     func resumeImport() {
-        guard !importRunning, let job = importJob, !job.saved else { return }
+        guard !isRestoringLibrary, !importRunning, let job = importJob, !job.saved else { return }
         if let until = job.cooldownUntil, until > Date() {
             message = "匹配暂时冷却中，请在 " + until.formatted(date: .omitted, time: .standard) + " 后继续。"
             return
@@ -306,6 +410,7 @@ import Observation
         }
     }
     @discardableResult func selectImportTrack(_ track: Track, at index: Int, jobID: String) -> Bool {
+        guard !isRestoringLibrary else { return false }
         guard var job = importJob, job.id == jobID, !job.saved, job.matches.indices.contains(index) else {
             message = "导入任务已变化，请重新打开歌曲的搜索窗口。"
             return false
@@ -334,7 +439,7 @@ import Observation
         }
     }
     func retryFailedImport() {
-        guard !importRunning, let job = importJob else { return }
+        guard !isRestoringLibrary, !importRunning, let job = importJob else { return }
         if let until = job.cooldownUntil, until > Date() {
             message = "匹配暂时冷却中，请在 " + until.formatted(date: .omitted, time: .standard) + " 后重试。"
             return
@@ -344,15 +449,16 @@ import Observation
         resumeImport()
     }
     private func pauseImportForRecovery(_ reason: String, seconds: TimeInterval) {
+        guard !isRestoringLibrary else { return }
         importJob?.pauseReason = reason
         importJob?.cooldownUntil = Date().addingTimeInterval(seconds)
         persistImport()
         message = reason
     }
-    func pauseImport() { importTask?.cancel() }
-    func persistImport() { do { if let importJob { try database.saveState(importJob, key: "import-job") } } catch { message = error.localizedDescription } }
+    func pauseImport() { importTask?.cancel(); importFetchTask?.cancel() }
+    func persistImport() { guard !isRestoringLibrary else { return }; do { if let importJob { try database.saveState(importJob, key: "import-job") } } catch { message = error.localizedDescription } }
     func saveImport() {
-        guard let job = importJob, !importRunning else { return }
+        guard !isRestoringLibrary, let job = importJob, !importRunning else { return }
         guard job.matches.allSatisfy({ $0.reviewed || ($0.track != nil && $0.score >= 0.72) }) else { message = "请先确认或跳过所有未匹配和低置信度项目。"; return }
         let selected = job.matches.compactMap(\.track)
         guard !selected.isEmpty else { message = "没有可保存的歌曲。"; return }
@@ -363,5 +469,31 @@ import Observation
         player.visualizerVisible = mainWindowVisible && showPlayer
         floatingController?.update()
     }
-    func shutdown() { pauseImport(); downloads.pauseAll(); player.shutdown() }
+    func editLocalAudio(_ track: Track) -> Bool {
+        guard !isRestoringLibrary, track.source == "local" else { return false }
+        do { try database.saveLocalTrack(track, protectingExisting: true); localFilesRevision += 1; message = "歌曲资料已更新，原音频文件未改动。"; loadSection(); return true }
+        catch { message = "资料未保存：" + error.localizedDescription; return false }
+    }
+    func chooseLocalAudio(relinking original: Track? = nil) {
+        guard !isRestoringLibrary else { return }
+        let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = original == nil
+        panel.allowedFileTypes = ["mp3", "aac", "m4a", "flac", "wav"]
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls, epoch = libraryEpoch
+        importFetchTask?.cancel()
+        importFetchTask = Task {
+            do {
+                for url in urls {
+                    let track = try await LocalMusic.read(url, replacing: original)
+                    try Task.checkCancellation()
+                    guard !isRestoringLibrary, libraryEpoch == epoch else { return }
+                    try database.saveLocalTrack(track, protectingExisting: original != nil)
+                    localFilesRevision += 1
+                }
+                message = original == nil ? "已导入原文件引用，音频未复制或改写。" : "文件已重新关联，歌曲身份和历史保持。当前队列仍使用原地址。"
+                loadSection()
+            } catch { if !Task.isCancelled && libraryEpoch == epoch { message = "文件不可读取或导入未完成，已保留现有资料：" + error.localizedDescription } }
+        }
+    }
+    func shutdown() { compactPlayer.close(); pauseImport(); downloads.pauseAll(); player.shutdown() }
 }

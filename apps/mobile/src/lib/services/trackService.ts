@@ -13,6 +13,8 @@ import {
 	createTrackNotFound,
 	createValidationError,
 } from '@/lib/errors/service'
+import { drizzleSyncDatabase } from '@/lib/sync/drizzleRecording'
+import { localRecorder } from '@/lib/sync/localRecording'
 import type {
 	BilibiliTrack,
 	LocalTrack,
@@ -194,30 +196,64 @@ export class TrackService {
 		payload: UpdateTrackPayload,
 	): ResultAsync<Track, ServiceError | DatabaseError> {
 		const { id, ...dataToUpdate } = payload
-
-		const updateResult = ResultAsync.fromPromise(
-			(async () => {
-				return await Sentry.startSpan(
-					{ name: 'db:update:track', op: 'db' },
-					() =>
-						this.db
-							.update(schema.tracks)
-							.set({
-								title: dataToUpdate.title ?? undefined,
-								artistId: dataToUpdate.artistId,
-								coverUrl: dataToUpdate.coverUrl,
-								duration: dataToUpdate.duration,
-							} satisfies Omit<UpdateTrackPayloadBase, 'id'>)
-							.where(eq(schema.tracks.id, id)),
-				)
-			})(),
+		return ResultAsync.fromPromise(
+			(async () =>
+				this.db.transaction((tx) => {
+					tx.update(schema.tracks)
+						.set({
+							title: dataToUpdate.title ?? undefined,
+							artistId: dataToUpdate.artistId,
+							coverUrl: dataToUpdate.coverUrl,
+							duration: dataToUpdate.duration,
+						} satisfies Omit<UpdateTrackPayloadBase, 'id'>)
+						.where(eq(schema.tracks.id, id))
+						.run()
+					const sync = drizzleSyncDatabase(tx)
+					const song = sync.getFirstSync<{ song_id: string }>(
+						'SELECT s.song_id FROM tracks t JOIN song_sources s ON s.source_key=t.unique_key WHERE t.id=?',
+						[id],
+					)
+					if (song) localRecorder(sync)?.captureSource(song.song_id)
+				}))(),
 			(e) =>
 				e instanceof ServiceError
 					? e
 					: new DatabaseError(`更新 track 失败：${id}`, { cause: e }),
-		)
+		).andThen(() => this.getTrackById(id))
+	}
 
-		return updateResult.andThen(() => this.getTrackById(id))
+	public setLiked(
+		trackId: number,
+		liked: boolean,
+	): ResultAsync<boolean, DatabaseError> {
+		return ResultAsync.fromPromise(
+			(async () =>
+				this.db.transaction((tx) => {
+					const sync = drizzleSyncDatabase(tx)
+					const song = sync.getFirstSync<{ song_id: string; source: string }>(
+						'SELECT s.song_id,t.source FROM tracks t JOIN song_sources s ON s.source_key=t.unique_key WHERE t.id=?',
+						[trackId],
+					)
+					if (!song || song.source !== 'bilibili')
+						throw new Error('仅支持标记网络歌曲的本机喜欢')
+					sync.runSync(
+						'INSERT INTO sync_like(song_id,liked) VALUES(?,?) ON CONFLICT(song_id) DO UPDATE SET liked=excluded.liked',
+						[song.song_id, liked ? 1 : 0],
+					)
+					localRecorder(sync)?.captureLike(song.song_id, liked)
+					return liked
+				}))(),
+			(cause) => new DatabaseError('保存本机喜欢失败', { cause }),
+		)
+	}
+
+	public isLiked(trackId: number): boolean {
+		return (
+			drizzleSyncDatabase(this.db).getFirstSync<{ liked: number }>(
+				'SELECT l.liked FROM sync_like l JOIN song_sources s ON s.song_id=l.song_id JOIN tracks t ON t.unique_key=s.source_key WHERE t.id=?',
+				[trackId],
+			)?.liked === 1
+		)
 	}
 
 	/**
@@ -665,12 +701,23 @@ export class TrackService {
 
 		const playCountSql = this.db
 			.select({
-				trackId: schema.playHistory.trackId,
+				trackId:
+					sql<number>`(SELECT id FROM tracks WHERE unique_key=${schema.librarySongs.activeSourceKey})`.as(
+						'library_active_track_id',
+					),
 				count: count().as('count'),
 			})
 			.from(schema.playHistory)
+			.innerJoin(
+				schema.historySourceSnapshots,
+				eq(schema.historySourceSnapshots.historyId, schema.playHistory.id),
+			)
+			.innerJoin(
+				schema.librarySongs,
+				eq(schema.librarySongs.id, schema.historySourceSnapshots.songId),
+			)
 			.where(onlyCompleted ? eq(schema.playHistory.completed, true) : undefined)
-			.groupBy(schema.playHistory.trackId)
+			.groupBy(schema.librarySongs.id)
 			.as('play_counts')
 
 		const whereConditions: (SQL | undefined)[] = []
@@ -876,24 +923,33 @@ export class TrackService {
 	> {
 		const { days, limit } = options
 
-		// Calculate cutoff timestamp in seconds
-		const cutoffTimeS = Math.floor(
-			(Date.now() - days * 24 * 60 * 60 * 1000) / 1000,
-		)
+		// History timestamps use milliseconds.
+		const cutoffTimeMs = Date.now() - days * 24 * 60 * 60 * 1000
 
 		const normalizedStartTime = schema.playHistory.startTime
 
-		// Subquery: aggregate total duration played per track
+		// Aggregate all retained sources by stable library song identity.
 		const durationSumSql = this.db
 			.select({
-				trackId: schema.playHistory.trackId,
+				trackId:
+					sql<number>`(SELECT id FROM tracks WHERE unique_key=${schema.librarySongs.activeSourceKey})`.as(
+						'library_active_track_id',
+					),
 				totalDuration: sum(schema.playHistory.durationPlayed).as(
 					'total_duration',
 				),
 			})
 			.from(schema.playHistory)
-			.where(sql`${normalizedStartTime} >= ${cutoffTimeS}`)
-			.groupBy(schema.playHistory.trackId)
+			.innerJoin(
+				schema.historySourceSnapshots,
+				eq(schema.historySourceSnapshots.historyId, schema.playHistory.id),
+			)
+			.innerJoin(
+				schema.librarySongs,
+				eq(schema.librarySongs.id, schema.historySourceSnapshots.songId),
+			)
+			.where(sql`${normalizedStartTime} >= ${cutoffTimeMs}`)
+			.groupBy(schema.librarySongs.id)
 			.as('duration_sums')
 
 		const historyQuery = Sentry.startSpan(

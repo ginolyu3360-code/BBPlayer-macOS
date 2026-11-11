@@ -1,11 +1,4 @@
-import {
-	getAnalytics,
-	logEvent,
-	logScreenView,
-	setAnalyticsCollectionEnabled,
-	setUserProperty,
-} from '@react-native-firebase/analytics'
-
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import log from '@/utils/log'
 
 const logger = log.extend('Service.Analytics')
@@ -22,7 +15,10 @@ type PlaylistSyncAction = 'sync_bilibili' | 'sync_external'
 
 class AnalyticsService {
 	private async safeLogEvent(name: string, params?: Record<string, unknown>) {
+		if (isPersonalBuild) return
 		try {
+			const { getAnalytics, logEvent } =
+				await import('@react-native-firebase/analytics')
 			logEvent(getAnalytics(), name, params)
 			logger.debug(`[Analytics] Logged event: ${name}`, params)
 		} catch (error) {
@@ -73,7 +69,10 @@ class AnalyticsService {
 		screenName: string,
 		screenclass: string = screenName,
 	) {
+		if (isPersonalBuild) return
 		try {
+			const { getAnalytics, logScreenView } =
+				await import('@react-native-firebase/analytics')
 			await logScreenView(getAnalytics(), {
 				screen_name: screenName,
 				screen_class: screenclass,
@@ -87,7 +86,10 @@ class AnalyticsService {
 	}
 
 	public async setUserProperty(name: string, value: string) {
+		if (isPersonalBuild) return
 		try {
+			const { getAnalytics, setUserProperty } =
+				await import('@react-native-firebase/analytics')
 			await setUserProperty(getAnalytics(), name, value)
 			logger.debug(`[Analytics] Set user property: ${name}=${value}`)
 		} catch (error) {
@@ -107,6 +109,9 @@ class AnalyticsService {
 	}
 
 	public async setAnalyticsCollectionEnabled(enabled: boolean) {
+		if (isPersonalBuild) return
+		const { getAnalytics, setAnalyticsCollectionEnabled } =
+			await import('@react-native-firebase/analytics')
 		await setAnalyticsCollectionEnabled(getAnalytics(), enabled)
 		logger.debug(`[Analytics] Collection enabled: ${enabled}`)
 	}

@@ -3,6 +3,7 @@ import { Observe } from 'expo-observe'
 import { useEffect } from 'react'
 
 import { useAppStore } from '@/hooks/stores/useAppStore'
+import { isPersonalBuild } from '@/lib/config/personalBuild'
 import { analyticsService } from '@/lib/services/analyticsService'
 
 /**
@@ -15,7 +16,9 @@ export function useFeatureTracking() {
 	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 
 	useEffect(() => {
-		Observe.configure({ dispatchingEnabled: enableDataCollection })
+		Observe.configure({
+			dispatchingEnabled: !isPersonalBuild && enableDataCollection,
+		})
 		void analyticsService.setAnalyticsCollectionEnabled(enableDataCollection)
 
 		if (!enableDataCollection) return
