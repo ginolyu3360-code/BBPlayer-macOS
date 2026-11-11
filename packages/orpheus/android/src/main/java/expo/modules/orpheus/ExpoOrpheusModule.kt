@@ -184,6 +184,7 @@ class ExpoOrpheusModule : Module() {
          * 处理错误
          */
         override fun onPlayerError(error: PlaybackException) {
+            if (OrpheusMusicService.instance?.tryFallbackAudio(error) == true) return
             val map = error.toJsMap().toMutableMap()
             map["platform"] = "android"
             sendEvent("onPlayerError", map)
@@ -337,6 +338,34 @@ class ExpoOrpheusModule : Module() {
         Property("restorePlaybackPositionEnabled")
             .get { GeneralStorage.isRestoreEnabled() }
             .set { enabled: Boolean -> GeneralStorage.setRestoreEnabled(enabled) }
+
+        Property("audioQuality")
+            .get { GeneralStorage.audioQuality() }
+            .set { value: String -> GeneralStorage.setAudioQuality(value) }
+
+        AsyncFunction("getStreamInfo") Coroutine { ->
+            withContext(Dispatchers.Main.immediate) {
+            val player = OrpheusMusicService.instance?.player
+            val format = player?.audioFormat
+            val uri = player?.currentMediaItem?.localConfiguration?.uri
+            val requestedPremium = uri?.getQueryParameter("hires") == "1" || uri?.getQueryParameter("dolby") == "1"
+            val alreadyFallback = uri?.getQueryParameter("fallback") == "1"
+            val mime = format?.sampleMimeType ?: ""
+            mapOf("mime" to mime, "codec" to (format?.codecs ?: ""), "sampleRate" to (format?.sampleRate ?: -1),
+                "bitrate" to (format?.bitrate ?: -1), "channels" to (format?.channelCount ?: -1),
+                "fallback" to (alreadyFallback || (requestedPremium && mime == "audio/mp4a-latm")))
+        }
+        }
+
+        Function("getEqualizer") {
+            val config = GeneralStorage.equalizer()
+            mapOf("enabled" to config.enabled, "gains" to config.gains, "status" to (OrpheusMusicService.instance?.equalizerStatus() ?: 0))
+        }
+
+        Function("setEqualizer") { enabled: Boolean, gains: List<Double> ->
+            GeneralStorage.setEqualizer(expo.modules.orpheus.audio.EqualizerConfig(enabled, gains))
+            android.os.Handler(android.os.Looper.getMainLooper()).post { OrpheusMusicService.instance?.refreshEqualizerRoute() }
+        }
 
         Property("loudnessNormalizationEnabled")
             .get { GeneralStorage.isLoudnessNormalizationEnabled() }

@@ -6,10 +6,25 @@ import androidx.core.graphics.toColorInt
 import androidx.media3.common.MediaItem
 import com.tencent.mmkv.MMKV
 import expo.modules.orpheus.model.TrackRecord
+import expo.modules.orpheus.audio.EqualizerConfig
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 object GeneralStorage {
+    private const val KEY_AUDIO_QUALITY = "config_audio_quality"
+    fun audioQuality(): String = kv?.decodeString(KEY_AUDIO_QUALITY, "aac")?.takeIf { it in setOf("aac","lossless","dolby") } ?: "aac"
+    fun setAudioQuality(value: String) { require(value in setOf("aac","lossless","dolby")); safeKv.encode(KEY_AUDIO_QUALITY,value) }
+    private const val KEY_EQ_ENABLED = "config_equalizer_enabled"
+    private const val KEY_EQ_GAINS = "config_equalizer_gains"
+    @Volatile private var eq = EqualizerConfig()
+    internal fun equalizer() = eq
+    internal fun setEqualizer(config: EqualizerConfig) {
+        safeKv.encode(KEY_EQ_ENABLED, config.enabled)
+        safeKv.encode(KEY_EQ_GAINS, config.gains.joinToString(","))
+        eq = config
+    }
+    private fun decodeEQ(enabled: Boolean, raw: String?) = EqualizerConfig(enabled,
+        raw?.split(",")?.map { it.toDoubleOrNull() ?: 0.0 } ?: emptyList())
     private var kv: MMKV? = null
     private val json = Json { ignoreUnknownKeys = true }
     private var lastSavedQueueSnapshot: List<String>? = null
@@ -39,6 +54,7 @@ object GeneralStorage {
         if (kv == null) {
             MMKV.initialize(context)
             kv = MMKV.mmkvWithID("player_queue_store")
+            eq = decodeEQ(safeKv.decodeBool(KEY_EQ_ENABLED, false), safeKv.decodeString(KEY_EQ_GAINS))
         }
     }
 
@@ -185,6 +201,9 @@ object GeneralStorage {
 
     fun exportConfig(): Map<String, Any> {
         return mapOf(
+            KEY_AUDIO_QUALITY to audioQuality(),
+            KEY_EQ_ENABLED to eq.enabled,
+            KEY_EQ_GAINS to eq.gains.joinToString(","),
             KEY_RESTORE_POSITION_ENABLED to isRestoreEnabled(),
             KEY_LOUDNESS_NORMALIZATION_ENABLED to isLoudnessNormalizationEnabled(),
             KEY_AUTOPLAY_ON_START_ENABLED to isAutoplayOnStartEnabled(),
@@ -200,6 +219,9 @@ object GeneralStorage {
     }
 
     fun importConfig(data: Map<String, Any>) {
+        (data[KEY_AUDIO_QUALITY] as? String)?.takeIf { it in setOf("aac","lossless","dolby") }?.let { setAudioQuality(it) }
+        if (KEY_EQ_ENABLED in data || KEY_EQ_GAINS in data)
+            setEqualizer(decodeEQ(data[KEY_EQ_ENABLED] as? Boolean ?: eq.enabled, data[KEY_EQ_GAINS] as? String ?: eq.gains.joinToString(",")))
         (data[KEY_RESTORE_POSITION_ENABLED] as? Boolean)?.let { setRestoreEnabled(it) }
         (data[KEY_LOUDNESS_NORMALIZATION_ENABLED] as? Boolean)?.let { setLoudnessNormalizationEnabled(it) }
         (data[KEY_AUTOPLAY_ON_START_ENABLED] as? Boolean)?.let { setAutoplayOnStartEnabled(it) }

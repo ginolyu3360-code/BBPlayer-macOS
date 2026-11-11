@@ -5,10 +5,12 @@ import { ScrollView, StyleSheet, View } from 'react-native'
 import { Appbar, Text, useTheme } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import AudioQualitySettings from '@/components/AudioQualitySettings'
 import { MenuView } from '@/components/common/FunctionalMenu'
 import IconButton from '@/components/common/IconButton'
 import SettingsSectionTitle from '@/components/common/SettingsSectionTitle'
 import UniversalSwitch from '@/components/common/UniversalSwitch'
+import EqualizerSettings from '@/components/EqualizerSettings'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import useAppStore from '@/hooks/stores/useAppStore'
 import { useMenuActions } from '@/hooks/ui/useMenuActions'
@@ -109,6 +111,9 @@ export default function PlaybackSettingsPage() {
 						}}
 					/>
 				</View>
+
+				<AudioQualitySettings />
+				<EqualizerSettings />
 
 				<SettingsSectionTitle title='启动时行为' />
 				<View style={styles.settingRow}>

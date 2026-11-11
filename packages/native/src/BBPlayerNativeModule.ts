@@ -10,12 +10,29 @@ import type {
 	UnzipResult,
 } from './BBPlayerNative.types'
 
+export interface LocalAudioFile {
+	uri: string
+	title: string | null
+	artist: string | null
+	duration: number
+	mimeType: string
+}
+
 declare class BBPlayerNativeModule extends NativeModule {
 	/**
 	 * 当前 APK 签名证书的 SHA-256 指纹（小写十六进制），模块初始化时计算一次。
 	 * 取不到时为空字符串。
 	 */
 	readonly apkSigningCertificateSha256: string
+	discoverLANPeersAsync(): Promise<{ name: string; endpoint: string }[]>
+	requestLANSyncAsync(
+		endpoint: string,
+		pin: string,
+		path: string,
+		bearer: string | null,
+		body: string,
+	): Promise<string>
+	readAudioFileAsync(uri: string, retain: boolean): Promise<LocalAudioFile>
 	getSupportedAbisAsync(): Promise<string[]>
 	/**
 	 * Android 应用私有目录中的各项占用，以及安装包大小（字节）。
@@ -122,3 +139,19 @@ export const exportBackupToDownloads = (
 	fileName: string,
 	mimeType: string,
 ) => getNativeModule().exportBackupToDownloads(sourceUri, fileName, mimeType)
+
+export const readAudioFileAsync = (uri: string, retain = false) =>
+	getNativeModule().readAudioFileAsync(uri, retain)
+
+/** Direct LAN-only HTTPS with an explicitly paired leaf certificate. */
+export const requestLANSyncAsync = (
+	endpoint: string,
+	pin: string,
+	path: string,
+	bearer: string | null,
+	body: string,
+) => getNativeModule().requestLANSyncAsync(endpoint, pin, path, bearer, body)
+
+/** Brief Bonjour discovery; callers must still verify the paired certificate. */
+export const discoverLANPeersAsync = () =>
+	getNativeModule().discoverLANPeersAsync()

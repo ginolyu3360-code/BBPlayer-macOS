@@ -1,5 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as FileSystem from 'expo-file-system'
+import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Dialog, TextInput } from 'react-native-paper'
@@ -103,6 +104,21 @@ export default function EditTrackMetadataModal({ track }: { track: Track }) {
 						onPress={handleImagePicker}
 					/>
 				</View>
+				{track.source === 'bilibili' && (
+					<Button
+						onPress={() => {
+							close()
+							useModalStore.getState().doAfterModalHostClosed(() =>
+								router.push({
+									pathname: '/track/replace-source',
+									params: { trackId: track.id },
+								}),
+							)
+						}}
+					>
+						替换播放来源
+					</Button>
+				)}
 			</Dialog.Content>
 			<Dialog.Actions>
 				<Button onPress={handleDismiss}>取消</Button>

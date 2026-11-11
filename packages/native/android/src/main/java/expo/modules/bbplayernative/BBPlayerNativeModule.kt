@@ -38,6 +38,18 @@ class BBPlayerNativeModule : Module() {
             requireContext().packageManager.canRequestPackageInstalls()
         }
 
+        AsyncFunction("discoverLANPeersAsync") Coroutine { ->
+            LANDiscovery.discover(requireContext())
+        }
+
+        AsyncFunction("requestLANSyncAsync") Coroutine { endpoint: String, pin: String, path: String, bearer: String?, body: String ->
+            withContext(Dispatchers.IO) { PinnedLANClient.request(endpoint, pin, path, bearer, body) }
+        }
+
+        AsyncFunction("readAudioFileAsync") Coroutine { uri: String, retain: Boolean ->
+            withContext(Dispatchers.IO) { AudioFileAccess.read(requireContext(), uri, retain) }
+        }
+
         AsyncFunction("getSupportedAbisAsync") Coroutine { ->
             return@Coroutine Build.SUPPORTED_ABIS.toList()
         }

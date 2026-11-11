@@ -14,6 +14,9 @@ import Animated, {
 } from 'react-native-reanimated'
 import { scheduleOnRN } from 'react-native-worklets'
 
+import useAppStore from '@/hooks/stores/useAppStore'
+import { normalizedLyricPresentation } from '@/lib/config/lyricPresentation'
+
 import { KaraokeWord } from './KaraokeWord'
 
 const AnimatedTouchable = createAnimatedComponent(Touchable)
@@ -65,6 +68,11 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 	preferredLyricType = 'translation',
 }: LyricLineItemProps) {
 	const colors = useTheme().colors
+	const customPresentation = useAppStore(
+		(state) => state.settings.lyricPresentation,
+	)
+	const presentation = normalizedLyricPresentation(customPresentation)
+	const activeColor = presentation.accent ? colors.primary : colors.onSurface
 
 	const isHighlighted = useDerivedValue(() => {
 		return currentHighlightIndex.value === index
@@ -83,7 +91,7 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 	const lyricColor = useLyricColor(
 		isHighlighted,
 		isVerbatim,
-		colors.primary,
+		activeColor,
 		colors.onSurfaceDisabled,
 	)
 
@@ -108,7 +116,14 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 			: item.translation || item.romaji || item.translations?.[0]
 
 	return (
-		<View style={styles.oldSchoolItemWrapper}>
+		<View
+			style={[
+				styles.oldSchoolItemWrapper,
+				customPresentation
+					? { paddingVertical: presentation.spacing / 2 }
+					: undefined,
+			]}
+		>
 			<Pressable
 				style={StyleSheet.absoluteFill}
 				onPress={onPressBackground}
@@ -132,20 +147,57 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 								key={`${index}_${idx}`}
 								span={span}
 								currentTime={gatedCurrentTime}
-								baseStyle={styles.oldSchoolItemText}
-								activeColor={colors.primary}
+								baseStyle={[
+									styles.oldSchoolItemText,
+									customPresentation
+										? {
+												fontSize: (presentation.fontSize * 14) / 24,
+												lineHeight: ((presentation.fontSize * 14) / 24) * 1.4,
+											}
+										: undefined,
+								]}
+								activeColor={activeColor}
 								inactiveColor={colors.onSurfaceDisabled}
 							/>
 						))}
 					</View>
 				) : (
-					<Animated.Text style={[styles.oldSchoolItemText, animatedStyle]}>
+					<Animated.Text
+						style={[
+							styles.oldSchoolItemText,
+							customPresentation
+								? {
+										fontSize: (presentation.fontSize * 14) / 24,
+										lineHeight: ((presentation.fontSize * 14) / 24) * 1.4,
+									}
+								: undefined,
+							animatedStyle,
+						]}
+					>
 						{item.content}
 					</Animated.Text>
 				)}
 				{subText && (
 					<Animated.Text
-						style={[styles.oldSchoolItemTranslation, animatedStyle]}
+						style={[
+							styles.oldSchoolItemTranslation,
+							customPresentation
+								? {
+										fontSize:
+											(presentation.fontSize *
+												presentation.translationRatio *
+												14) /
+											24,
+										lineHeight:
+											((presentation.fontSize *
+												presentation.translationRatio *
+												14) /
+												24) *
+											1.4,
+									}
+								: undefined,
+							animatedStyle,
+						]}
 					>
 						{subText}
 					</Animated.Text>
@@ -166,6 +218,13 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 	preferredLyricType = 'translation',
 }: LyricLineItemProps) {
 	const theme = useTheme()
+	const customPresentation = useAppStore(
+		(state) => state.settings.lyricPresentation,
+	)
+	const presentation = normalizedLyricPresentation(customPresentation)
+	const activeColor = presentation.accent
+		? theme.colors.primary
+		: theme.colors.onSurface
 
 	const isHighlighted = useDerivedValue(() => {
 		return currentHighlightIndex.value === index
@@ -212,7 +271,7 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 	const lyricColor = useLyricColor(
 		isHighlighted,
 		isVerbatim,
-		theme.colors.primary,
+		activeColor,
 		theme.colors.onSurfaceDisabled,
 		isHighlightedRState,
 	)
@@ -230,8 +289,16 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 							key={`${index}_${idx}`}
 							span={span}
 							currentTime={currentTime}
-							baseStyle={styles.modernItemText}
-							activeColor={theme.colors.primary}
+							baseStyle={[
+								styles.modernItemText,
+								customPresentation
+									? {
+											fontSize: presentation.fontSize,
+											lineHeight: presentation.fontSize * 1.4,
+										}
+									: undefined,
+							]}
+							activeColor={activeColor}
 							inactiveColor={theme.colors.onSurfaceDisabled}
 						/>
 					))}
@@ -240,7 +307,18 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 		}
 
 		return (
-			<Animated.Text style={[styles.modernItemText, textAnimatedStyle]}>
+			<Animated.Text
+				style={[
+					styles.modernItemText,
+					customPresentation
+						? {
+								fontSize: presentation.fontSize,
+								lineHeight: presentation.fontSize * 1.4,
+							}
+						: undefined,
+					textAnimatedStyle,
+				]}
+			>
 				{item.content}
 			</Animated.Text>
 		)
@@ -252,7 +330,14 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 			: item.translation || item.romaji || item.translations?.[0]
 
 	return (
-		<View style={styles.modernItemWrapper}>
+		<View
+			style={[
+				styles.modernItemWrapper,
+				customPresentation
+					? { paddingVertical: presentation.spacing / 2 }
+					: undefined,
+			]}
+		>
 			<Pressable
 				style={StyleSheet.absoluteFill}
 				onPress={onPressBackground}
@@ -265,7 +350,20 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 				{renderContent()}
 				{subText && (
 					<Animated.Text
-						style={[styles.modernItemTranslation, textAnimatedStyle]}
+						style={[
+							styles.modernItemTranslation,
+							customPresentation
+								? {
+										fontSize:
+											presentation.fontSize * presentation.translationRatio,
+										lineHeight:
+											presentation.fontSize *
+											presentation.translationRatio *
+											1.4,
+									}
+								: undefined,
+							textAnimatedStyle,
+						]}
 					>
 						{subText}
 					</Animated.Text>

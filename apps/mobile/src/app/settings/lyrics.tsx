@@ -10,6 +10,7 @@ import { MenuView } from '@/components/common/FunctionalMenu'
 import IconButton from '@/components/common/IconButton'
 import SettingsSectionTitle from '@/components/common/SettingsSectionTitle'
 import UniversalSwitch from '@/components/common/UniversalSwitch'
+import LyricPresentationSettings from '@/components/LyricPresentationSettings'
 import { alert } from '@/components/modals/AlertModal'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { useAppStore } from '@/hooks/stores/useAppStore'
@@ -243,6 +244,7 @@ export default function LyricsSettingsPage() {
 					{ paddingBottom: insets.bottom + (haveTrack ? 70 + 20 : 20) },
 				]}
 			>
+				<LyricPresentationSettings />
 				<SettingsSectionTitle
 					title='歌词显示'
 					first

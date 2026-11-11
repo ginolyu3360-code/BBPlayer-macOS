@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+
 package expo.modules.orpheus.bilibili
 
 import kotlinx.serialization.SerialName
@@ -23,21 +25,29 @@ data class BilibiliAudioStreamResponse(
 data class DurlItem(
     @SerialName("order") val order: Int,
     @SerialName("url") val url: String,
-    @SerialName("backup_url") val backupUrl: List<String>?
+    @kotlinx.serialization.json.JsonNames("backupUrl")
+    @SerialName("backup_url") val backupUrl: List<String>? = null
 )
 
 @Serializable
 data class DashData(
-    @SerialName("audio") val audio: List<DashAudioItem>?,
-    @SerialName("dolby") val dolby: DolbyData?,
-    @SerialName("flac") val flac: FlacData?
+    @SerialName("audio") val audio: List<DashAudioItem>? = null,
+    @SerialName("dolby") val dolby: DolbyData? = null,
+    @SerialName("flac") val flac: FlacData? = null
 )
 
 @Serializable
 data class DashAudioItem(
     @SerialName("id") val id: Int,
+    @kotlinx.serialization.json.JsonNames("baseUrl")
     @SerialName("base_url") val baseUrl: String,
-    @SerialName("backup_url") val backupUrl: List<String>?
+    @SerialName("codecs") val codecs: String = "",
+    @SerialName("bandwidth") val bandwidth: Int = 0,
+    @kotlinx.serialization.json.JsonNames("audio_sample_rate", "audioSampleRate")
+    @SerialName("samplerate") val sampleRate: Int = 0,
+    @SerialName("channel") val channels: Int = 0,
+    @kotlinx.serialization.json.JsonNames("backupUrl")
+    @SerialName("backup_url") val backupUrl: List<String>? = null
 )
 
 @Serializable

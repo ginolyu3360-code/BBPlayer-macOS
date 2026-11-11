@@ -1,3 +1,4 @@
+import { Orpheus } from '@bbplayer/orpheus'
 import { type Track as OrpheusTrack } from '@bbplayer/orpheus'
 import type { Result } from 'neverthrow'
 import { err, ok } from 'neverthrow'
@@ -175,9 +176,13 @@ async function addToQueue({
 
 function getInternalPlayUri(track: Track) {
 	if (track.source === 'bilibili') {
-		return track.bilibiliMetadata.isMultiPage
-			? `orpheus://bilibili?bvid=${track.bilibiliMetadata.bvid}&cid=${track.bilibiliMetadata.cid}&hires=0&dolby=0`
-			: `orpheus://bilibili?bvid=${track.bilibiliMetadata.bvid}&hires=0&dolby=0`
+		const metadata = track.bilibiliMetadata
+		const cid =
+			metadata.cid === null || metadata.cid === undefined
+				? ''
+				: `&cid=${metadata.cid}`
+		const quality = Orpheus.audioQuality
+		return `orpheus://bilibili?bvid=${encodeURIComponent(metadata.bvid)}${cid}&hires=${quality === 'lossless' ? 1 : 0}&dolby=${quality === 'dolby' ? 1 : 0}`
 	}
 	if (track.source === 'local' && track.localMetadata) {
 		return track.localMetadata.localPath

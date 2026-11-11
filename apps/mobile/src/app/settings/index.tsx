@@ -38,6 +38,18 @@ export default function SettingsPage() {
 						first
 					/>
 					<List.Item
+						title='本地音频'
+						description='导入原文件引用、管理资料与重新关联'
+						left={(props) => (
+							<List.Icon
+								{...props}
+								icon='folder-music'
+							/>
+						)}
+						onPress={() => router.navigate('/track/local-audio')}
+					/>
+
+					<List.Item
 						title='外观与主题'
 						description='播放器样式、动态主题、启动动画'
 						left={(props) => (
@@ -127,6 +139,18 @@ export default function SettingsPage() {
 							/>
 						)}
 						onPress={() => router.navigate('/settings/backup')}
+					/>
+
+					<List.Item
+						title='设备间同步'
+						description='配对 Mac，同步网络歌单、喜欢与手动歌词'
+						left={(props) => (
+							<List.Icon
+								{...props}
+								icon='sync'
+							/>
+						)}
+						onPress={() => router.navigate('/settings/lan-sync')}
 					/>
 
 					<SettingsSectionTitle title='通用与关于' />

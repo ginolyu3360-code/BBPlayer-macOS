@@ -1,0 +1,1 @@
+CREATE INDEX `sync_pending` ON `sync_operation` (`applied`,`actor`,`sequence`);

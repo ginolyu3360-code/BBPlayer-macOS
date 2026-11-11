@@ -341,3 +341,96 @@ export const localMetadataRelations = relations(localMetadata, ({ one }) => ({
 		references: [tracks.id],
 	}),
 }))
+
+// Library identity is independent from the source key used by playback and caches.
+export const playlistIdentities = sqliteTable('playlist_identities', {
+	playlistId: integer('playlist_id')
+		.primaryKey()
+		.references(() => playlists.id, { onDelete: 'cascade' }),
+	id: text('id').notNull().unique(),
+})
+
+export const librarySongs = sqliteTable('library_songs', {
+	id: text('id').primaryKey(),
+	activeSourceKey: text('active_source_key')
+		.unique()
+		.references(() => tracks.uniqueKey, { onDelete: 'set null' }),
+})
+
+export const songSources = sqliteTable('song_sources', {
+	sourceKey: text('source_key')
+		.primaryKey()
+		.references(() => tracks.uniqueKey, { onDelete: 'cascade' }),
+	songId: text('song_id')
+		.notNull()
+		.references(() => librarySongs.id),
+})
+
+export const historySourceSnapshots = sqliteTable('history_source_snapshots', {
+	historyId: integer('history_id')
+		.primaryKey()
+		.references(() => playHistory.id, { onDelete: 'cascade' }),
+	songId: text('song_id')
+		.notNull()
+		.references(() => librarySongs.id),
+	sourceKey: text('source_key').notNull(),
+	payload: text('payload').notNull(),
+	evidence: text('evidence', {
+		enum: ['recordedAtPlayback', 'observedAtMigration'],
+	}).notNull(),
+})
+
+export const syncOperations = sqliteTable(
+	'sync_operation',
+	{
+		id: text('id').primaryKey(),
+		actor: text('actor').notNull(),
+		sequence: integer('sequence').notNull(),
+		payload: text('payload').notNull(),
+		applied: integer('applied').notNull().default(0),
+	},
+	(table) => [
+		uniqueIndex('sync_actor_sequence').on(table.actor, table.sequence),
+		index('sync_pending').on(table.applied, table.actor, table.sequence),
+	],
+)
+export const syncRevisions = sqliteTable('sync_revision', {
+	actor: text('actor').primaryKey(),
+	sequence: integer('sequence').notNull(),
+})
+export const syncHeads = sqliteTable(
+	'sync_head',
+	{
+		entity: text('entity').notNull(),
+		field: text('field').notNull(),
+		operationId: text('operation_id')
+			.notNull()
+			.references(() => syncOperations.id),
+	},
+	(table) => [
+		primaryKey({ columns: [table.entity, table.field, table.operationId] }),
+	],
+)
+export const syncAcknowledgements = sqliteTable(
+	'sync_ack',
+	{
+		peer: text('peer').notNull(),
+		operationId: text('operation_id')
+			.notNull()
+			.references(() => syncOperations.id),
+	},
+	(table) => [primaryKey({ columns: [table.peer, table.operationId] })],
+)
+export const syncLikes = sqliteTable('sync_like', {
+	songId: text('song_id').primaryKey(),
+	liked: integer('liked').notNull(),
+})
+export const syncMetadata = sqliteTable('sync_meta', {
+	key: text('key').primaryKey(),
+	value: text('value').notNull(),
+})
+
+export const syncLyrics = sqliteTable('sync_lyric', {
+	sourceKey: text('source_key').primaryKey(),
+	payload: text('payload').notNull(),
+})

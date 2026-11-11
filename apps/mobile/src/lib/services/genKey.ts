@@ -1,11 +1,9 @@
+import SHA256 from 'crypto-js/sha256'
 import type { Result } from 'neverthrow'
 import { err, ok } from 'neverthrow'
 
 import type { ServiceError } from '@/lib/errors'
-import {
-	createNotImplementedError,
-	createValidationError,
-} from '@/lib/errors/service'
+import { createValidationError } from '@/lib/errors/service'
 import type { TrackSourceData } from '@/types/services/track'
 
 export default function generateUniqueTrackKey(
@@ -22,13 +20,12 @@ export default function generateUniqueTrackKey(
 				: ok(`${payload.source}::${biliMeta.bvid}`)
 		}
 		case 'local': {
-			// const localMeta = payload.localMetadata
-			// return ok(`${payload.source}::${localMeta.localPath}`)
-			// 基于 localPath 的业务主键太不可靠，考虑基于文件生成 hash
-			return err(
-				createNotImplementedError(`未实现 local source 的 uniqueKey 生成`),
-			)
+			const uri = payload.localMetadata.localPath
+			if (!uri.startsWith('content://') && !uri.startsWith('file://'))
+				return err(createValidationError('请选择本地音频文件'))
+			return ok(`local::${SHA256(uri).toString()}`)
 		}
+
 		default:
 			return err(
 				createValidationError(
