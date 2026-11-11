@@ -34,21 +34,21 @@ At the next build, check the selected signing identity first. With the required 
 
 ## 已验证
 
-| 项目 | 证据 |
-|---|---|
-| 原生独立构建 | SwiftPM Debug / Release 成功；Xcode `BBPlayer` scheme Debug 独立构建成功 |
-| 本地应用包 | ARM64 `.app`，本机临时签名；`codesign --verify --deep --strict` 成功；具体大小和 SHA 见 `validation/artifact.json` |
-| 核心回归 | 27 个 Swift 测试通过；身份、WBI、LRC / SPL / YRC、统计、缓存、请求、队列、试听、恢复和下载 |
-| 真实音频 | BVID `BV1Zu411x7mc`；常规 AAC 解析、32KB Range、播放、45 秒定位成功；实际 PCM 采样超过 100 万帧 |
-| 频谱暂停与恢复 | 真实正弦音频测试：隐藏频谱后播放进度继续，重新显示后频谱恢复，非模拟柱形动画 |
-| 桌面界面 | 实际启动、普通搜索、播放页与设置页已检查；关闭主窗后原生歌词面板仍显示内容；重启不自动发声 |
-| 公开内容接口 | B 站关键词 20 条；网易云歌词与 200 首公开歌单；QQ 歌词与 66 首公开歌单；装扮检索与 42 个资源下载 |
-| 真实装扮视频 | AVAssetReader 原生解码得到 1080×1618 帧 |
-| SVGA | 官方样例、1.x 样例、真实 B 站 2.1 动画均输出非透明像素，结果见 `validation/renderers.json` |
-| SVGA 隔离 | 固定本地依赖；无外部脚本、凭据或通用原生调用；静态 protobuf 解码；未开启 unsafe-eval；额外 10 个静态解码断言通过 |
-| 下载恢复 | 本机 Range 服务集成测试：暂停后继续、不重复整首下载、文件逐字节相同、离线响度元数据保留、删除后两种内容身份映射均清除；另以真实 AAC 下载 3,397,406 字节，禁用网络解析后本地播放推进超过 1 秒、捕获 65,536 PCM 帧、网络解析次数为 0 |
-| 登录错误状态 | 模拟二维码过期 / 已扫码、登录失效、未向二维码轮询传 Cookie、拒绝向其他域名传凭据 |
-| 统计规模 | 1 万曲目 / 100 歌单 / 10 万历史，搜索、分页、最近与统计组合查询约 0.12 秒；并发构建时曾为 0.29 秒 |
+| 项目           | 证据                                                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 原生独立构建   | SwiftPM Debug / Release 成功；Xcode `BBPlayer` scheme Debug 独立构建成功                                                                                                                                                           |
+| 本地应用包     | ARM64 `.app`，本机临时签名；`codesign --verify --deep --strict` 成功；具体大小和 SHA 见 `validation/artifact.json`                                                                                                                 |
+| 核心回归       | 27 个 Swift 测试通过；身份、WBI、LRC / SPL / YRC、统计、缓存、请求、队列、试听、恢复和下载                                                                                                                                         |
+| 真实音频       | BVID `BV1Zu411x7mc`；常规 AAC 解析、32KB Range、播放、45 秒定位成功；实际 PCM 采样超过 100 万帧                                                                                                                                    |
+| 频谱暂停与恢复 | 真实正弦音频测试：隐藏频谱后播放进度继续，重新显示后频谱恢复，非模拟柱形动画                                                                                                                                                       |
+| 桌面界面       | 实际启动、普通搜索、播放页与设置页已检查；关闭主窗后原生歌词面板仍显示内容；重启不自动发声                                                                                                                                         |
+| 公开内容接口   | B 站关键词 20 条；网易云歌词与 200 首公开歌单；QQ 歌词与 66 首公开歌单；装扮检索与 42 个资源下载                                                                                                                                   |
+| 真实装扮视频   | AVAssetReader 原生解码得到 1080×1618 帧                                                                                                                                                                                            |
+| SVGA           | 官方样例、1.x 样例、真实 B 站 2.1 动画均输出非透明像素，结果见 `validation/renderers.json`                                                                                                                                         |
+| SVGA 隔离      | 固定本地依赖；无外部脚本、凭据或通用原生调用；静态 protobuf 解码；未开启 unsafe-eval；额外 10 个静态解码断言通过                                                                                                                   |
+| 下载恢复       | 本机 Range 服务集成测试：暂停后继续、不重复整首下载、文件逐字节相同、离线响度元数据保留、删除后两种内容身份映射均清除；另以真实 AAC 下载 3,397,406 字节，禁用网络解析后本地播放推进超过 1 秒、捕获 65,536 PCM 帧、网络解析次数为 0 |
+| 登录错误状态   | 模拟二维码过期 / 已扫码、登录失效、未向二维码轮询传 Cookie、拒绝向其他域名传凭据                                                                                                                                                   |
+| 统计规模       | 1 万曲目 / 100 歌单 / 10 万历史，搜索、分页、最近与统计组合查询约 0.12 秒；并发构建时曾为 0.29 秒                                                                                                                                  |
 
 ## Release 性能
 
@@ -60,16 +60,15 @@ At the next build, check the selected signing identity first. With the required 
 - 前台与悬浮歌词：另测，使用下载的真实装扮和仓库内与该 BVID 对应的逐字、翻译、罗马音歌词样例，避免空歌词代替渲染成本。短测不代表数小时无增长。
 - 旧的 `hidden-before-tap-suspension.json` 仅保留诊断历史。窗口可见性当时未记录，不能作为后台验收；不合条件或提前终止的采样没有计为通过。
 
-| 场景 | CPU 均值（单核 100%） | RSS 均值 / 峰值 | 采样时长 |
-|---|---:|---:|---:|
-| 主窗隐藏、歌词关闭 | 1.47% | 132.9 / 136.7 MiB | 320.4 秒 |
-| 前台完整效果与真实装扮 | 17.28% | 185.5 / 195.8 MiB | 64.2 秒 |
-| 主窗隐藏、悬浮歌词开启 | 4.54% | 159.5 / 162.5 MiB | 64.3 秒 |
+| 场景                   | CPU 均值（单核 100%） |   RSS 均值 / 峰值 | 采样时长 |
+| ---------------------- | --------------------: | ----------------: | -------: |
+| 主窗隐藏、歌词关闭     |                 1.47% | 132.9 / 136.7 MiB | 320.4 秒 |
+| 前台完整效果与真实装扮 |                17.28% | 185.5 / 195.8 MiB |  64.2 秒 |
+| 主窗隐藏、悬浮歌词开启 |                 4.54% | 159.5 / 162.5 MiB |  64.3 秒 |
 
 默认主题的三次进程冷启动为 0.375, 0.301, 0.295 秒，中位数 **0.301 秒**。三种场景均无未播放采样点，后台测试跨越完整歌曲结尾并继续循环。
 
 以上为静音解码播放测量。后台测试后只修正了诊断入口的前台窗口呈现；播放内核与正常应用路径没有变化。后台与另外两场景的构建 SHA 分别保留在各自 JSON，未伪装为同一个二进制。CPU、内存、启动和应用体积在这一测量口径内达到基线目标；完整人工验收仍未完成。
-
 
 ## 仍需本人或专门故障环境验收
 
@@ -138,7 +137,6 @@ The performance tables above remain historical v1 measurements. New dense-danmak
 
 Removed the redundant LocalAuthentication dependency and query-context-only test from the legacy credential path. Retained persistent signing, scoped legacy interaction suppression, explicit unlock actions and application cleanup. Unlock only retries reading the existing item; it does not migrate credentials or modify their ACL. Historical fixture/build results above do not establish real-account authorization retention. This source change does not replace the installed app.
 
-
 ## 2026-10-25 external playlist search and recovery
 
 - Mac import video searches omit the login cookie. Weak candidates trigger one title-only fallback; both use the shared four-second request scheduler. Candidates require song-title relevance and are deduplicated. Long decorated titles retain song-name evidence, unrelated artist videos are excluded, and alternate versions receive a penalty. Scores are heuristic rankings, not calibrated probabilities.
@@ -149,7 +147,6 @@ Removed the redundant LocalAuthentication dependency and query-context-only test
 - Mobile source changes remain local and are excluded from this Mac update. Per request, no further mobile checks or packaging are run. Earlier JS checks could not run because dependencies were absent; no mobile type/lint/device pass is claimed.
 - Installation uses the existing persistent signing identity and the authorized feature-branch push followed by `update-local.sh --install-only`. Post-push packaging, installed-manifest comparison and obsolete-package cleanup are verified by that update procedure; the pre-push test run does not by itself establish installation success. Historical artifact hashes describe their earlier builds.
 
-
 ## 2026-10-26 manual import selection crash
 
 - Repeated local crash reports identify a Swift exclusive-access abort at the manual-search selection callback. The callback read `importJob` to compute a candidate index while a nested write to that same observed value was active.
@@ -158,7 +155,6 @@ Removed the redundant LocalAuthentication dependency and query-context-only test
 - A native button-automation attempt could not access SwiftUI button nodes in the XCTest process and did not reach the selection action. It is not counted as a pointer-driven pass; the verified regression exercises the selection/persistence path with isolated data. Physical selection and sheet dismissal require runtime acceptance.
 - Mobile source remains untouched by this correction. Installation follows the existing authorized personal feature-branch push, post-push persistent-signature build, installed/build content check and obsolete-package cleanup. Existing import data is checked for equality before and after replacement; no library migration or rematching is part of installation.
 
-
 ## 2026-10-26 playback startup, next-track prefetch and rolling cache
 
 - `swift test --package-path apps/macos`: **68 core + 10 AppKit tests passed**, zero failures/skips. The 15 streaming regressions cover early incremental delivery, slow writes, delayed chapters, pending-write admission, buffer exhaustion/network recovery, pause intent, rapid switching/stale metadata, prefetch expiry/failure/cancellation, sequential/shuffle/list/single-repeat choices, real PCM and spectrum, HLS preview/position/rate/lyric restoration, local-listener shutdown and no-store responses. Download regression now verifies separately fetched chapters survive completion. Existing offline, lyrics and loudness tests passed.
@@ -166,21 +162,21 @@ Removed the redundant LocalAuthentication dependency and query-context-only test
 
 Controlled source: one aggregate 250,000 bytes/s budget (2 Mb/s), 100 ms per-request latency. Each cold run uses a fresh database and chunk cache. The clock measurement captures the first media time >=0.05 s and confirms continued progress through >=0.55 s. Slow writer delay is 200 ms per block; optional chapters are delayed 20 seconds in the ordinary fixture. Indexed fixture generation uses optional local ffmpeg with AAC stream copy, not transcoding; a machine without that generator explicitly skips the corresponding fixture tests.
 
-| Controlled case | Runs | Clock-start range |
-| --- | ---: | ---: |
-| Ordinary AAC cold | 5 | 0.623–0.676 s |
-| Ordinary AAC switch without prefetch | 5 | 0.617–0.672 s |
-| Indexed fragmented AAC cold | 5 | 1.007–1.023 s |
-| Indexed fragmented AAC switch with prefetch | 5 | 0.494–0.561 s |
+| Controlled case                             | Runs | Clock-start range |
+| ------------------------------------------- | ---: | ----------------: |
+| Ordinary AAC cold                           |    5 |     0.623–0.676 s |
+| Ordinary AAC switch without prefetch        |    5 |     0.617–0.672 s |
+| Indexed fragmented AAC cold                 |    5 |     1.007–1.023 s |
+| Indexed fragmented AAC switch with prefetch |    5 |     0.494–0.561 s |
 
 All 20 measurements meet the two-second threshold. The shared server throttle prevents parallel requests from multiplying the configured bandwidth. A separate 80,000 bytes/s fixture is explicitly paused to exhaust the buffer, then resumed to verify automatic recovery and to verify that a user pause suppresses recovery. Low-volume decoded audio, not callback counts alone, establishes the new track-mix spectrum result; output-muted diagnostic runs correctly report a zero spectrum.
 
 Real-network sample: `BV16zeK6zEnY`, video duration 50:24. The selected ordinary AAC stream is 82,451,937 bytes (approximately 79 MiB), not over 1 GiB. These Debug-probe observations are uncontrolled diagnostics, not a promise of constant public-network latency or a randomized performance study. Before cold runs used separate processes because the old loader had a cancellation/session exception; after runs reused one process with fresh per-run application caches. DNS/CDN/system caches were not controlled. Before and after switch batches overlapped on the public network, so their exact numerical ratio must not be treated as a controlled causal result. Switches start from `BV1Zu411x7mc`; after runs allow four seconds of current-track playback for next-track preparation.
 
-| Real-network operation | Before, three runs | After, three runs |
-| --- | --- | --- |
-| Cold clock start | No confirmed advance in the nominal 30 s window; 23.380 s; 12.680 s | 0.785 s; 0.575 s; 0.646 s |
-| Switch to the long sample | 29.363 s; no confirmed advance in 30 s; 27.977 s | 0.510 s; 0.503 s; 0.510 s |
+| Real-network operation    | Before, three runs                                                  | After, three runs         |
+| ------------------------- | ------------------------------------------------------------------- | ------------------------- |
+| Cold clock start          | No confirmed advance in the nominal 30 s window; 23.380 s; 12.680 s | 0.785 s; 0.575 s; 0.646 s |
+| Switch to the long sample | 29.363 s; no confirmed advance in 30 s; 27.977 s                    | 0.510 s; 0.503 s; 0.510 s |
 
 After cold-load phases: source ready 0.067–0.095 s, first byte 0.132–0.224 s, first delivery 0.155–0.289 s, item ready 0.161–0.305 s. Prefetched switches reuse memory-only source information and cached bytes; source ready is approximately 0.0003 s and item ready 0.097–0.101 s. Missing first-byte fields in those records mean a cache hit, not a zero-latency network request. The compact JSON retains every before/after phase and failed observation. Real cold runs capture 40,320–41,280 PCM frames with the visualizer enabled and output muted.
 
@@ -188,9 +184,27 @@ Capacity verification uses a 400,000-byte rolling budget plus a virtual HTTP res
 
 Limits: indexed playback uses macOS 27's track-mix tap; macOS 14–26 retain the compatible file loader and were not runtime-tested. The index must be flat and available in the first 256 KiB; unsupported or unindexed fragmented MP4 can still take longer to become ready. System-wide disk exhaustion, physical UI interaction, older-system runtime behavior and hours-long memory growth are not established by these tests. No mobile checks, Git writes, pushes, merges, publication or installation were performed. Local comparison builds added only timing/probe instrumentation to the baseline revision.
 
-
 ## 2026-10-27 local installation and Git handoff
 
 The 2026-10-26 measurements and pre-commit state above are historical evidence. Following explicit authorization, the current Release was rebuilt and installed locally on 2026-10-27. The installer verified the persistent signature and the complete installed/build file manifest before removing managed duplicates. Accessible duplicate-bundle scan found no remaining copies. Music, downloads and credential data directories were not modified by the installer; no runtime login-retention pass is inferred from that fact. The application was left stopped.
 
 The current Mac source manifest still matches the recorded implementation. Git handoff includes only `apps/macos`; pre-existing mobile changes remain local without additional validation. A feature-branch push is followed by `update-local.sh --install-only`, which reruns Mac tests, rebuilds from that pushed revision and verifies installation before cleanup. GitHub Actions remain disabled; no release, deployment, PR, merge or external review is part of this handoff.
+
+## 2026-11-02 migration snapshot foundation
+
+- Baseline Mac regression command completed successfully before changes; the core suite ran 68 tests, including the existing controlled startup/switch fixtures, with no failures.
+- Added an internal SQLite rollback snapshot primitive using GRDB backup, standalone DELETE journaling, integrity/foreign-key validation, private staging and overwrite refusal. This is not the user-facing portable backup and is not yet wired into migrations.
+- Two focused snapshot tests passed: committed WAL data and snapshot independence, existing-target preservation, invalid foreign-key rejection and staging cleanup. The first test exposed a WAL-mode snapshot reopen failure; converting the backup to standalone DELETE journaling fixed it before delivery.
+- Mac Release executable build passed. No signed application package, installation or live-library migration was performed. Independent source review found no actionable correctness defect in the snapshot primitive; it does not establish restore orchestration safety.
+
+## 2026-11-11 personal dual-platform checks
+
+- Stable identity, protected migration, portable backup/merge/restore, local file relinking, playback watchdog, causal operations and local recording have generated-data/SQLite regression coverage. Shared Swift/TypeScript fixtures cover wire decoding, source identity and causal insertion/reordering; they are not a device transport pass.
+- Android's Node checks currently cover 60 cases, including real SQLite and the synchronous Expo Drizzle driver. Type checking passed. Root lint retains two pre-existing findings in `scripts/test-static-decoder.cjs` and the Android account settings page; no introduced lint finding remained at the last check.
+- Native Android module builds passed for local audio, pinned transport/discovery and the Orpheus watchdog/quality/EQ changes. Orpheus's generated signal tests cover frequency response, headroom, channel isolation and transition/bypass behavior. Two stream-selection cases cover source availability, secure URLs and decoder gating. These checks did not invoke a physical decoder or speaker.
+- Mac EQ has three actual generated-PCM tests across sample rates/channel counts, covering exact default/flat bypass, relative response, headroom, unsupported-format bypass and channel isolation. Audio selection has a separate deterministic fixture. The full native suite ran 111 core cases and found a prefetch reuse race (two assertions in one case). The implementation now transfers an in-flight source resolution to the selected track with cancellation/expiry handling. The affected expiry/queue-mode case, controlled indexed startup/switch case and four recovery cases passed afterward. Other cases from that full run passed; a second full-suite pass is not claimed. A later planar Float32/smoothed-disable test also passed.
+- Device installation, manual UI/QR acceptance, real account entitlements, physical media keys, multi-display operation and four-hour endurance were not performed in this iteration. Current packages are local build artifacts from uncommitted work, not published releases.
+
+- Final local artifacts: the current Android personal APK assembled with its embedded Hermes bundle, and signature/package identity were verified against the dedicated key. The current Mac Release application packaged successfully with its persistent signing identity and strict signature verification. Neither artifact was installed. They were built from the uncommitted working tree.
+- Mac silent-start LAN identity loading now disables Keychain interaction; identity/pairing policy checks passed after this change. Background pairing persistence also fails rather than requesting UI interaction.
+- Privacy review found no new personal identifiers or home-directory paths in changed/new tracked candidates. Pre-existing identifiers in unchanged local tooling files were left untouched. The previously modified user files remained byte-identical to the preserved baseline.

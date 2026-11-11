@@ -121,13 +121,16 @@ public final class AudioResourceLoader: NSObject, AVAssetResourceLoaderDelegate,
     private let broker: AudioChunkRequests
     private let stateLock = NSLock()
     private var segmentServer: SegmentedAudioServer?
+    private let contentType: String
     private let onDelivery: @Sendable () -> Void
     private let queue = DispatchQueue(label: "com.bbplayer.macos.resource-loader")
     private var jobs: [ObjectIdentifier: Task<Void, Never>] = [:]
     public init(source: ResolvedAudio, cache: AudioCache, onFirstByte: @escaping @Sendable () -> Void = {}, onDelivery: @escaping @Sendable () -> Void = {}, onForeground: @escaping @Sendable () -> Void = {}) {
         broker = AudioChunkRequests(source: source, cache: cache, onFirstByte: onFirstByte, onForeground: onForeground)
         self.onDelivery = onDelivery
-        asset = AVURLAsset(url: URL(string: "bbpaudio://stream/\(UUID().uuidString).m4a")!, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
+        let rawFLAC = source.url.pathExtension.lowercased() == "flac"
+        contentType = rawFLAC ? (UTType(filenameExtension: "flac")?.identifier ?? "org.xiph.flac") : UTType.mpeg4Audio.identifier
+        asset = AVURLAsset(url: URL(string: "bbpaudio://stream/\(UUID().uuidString).\(rawFLAC ? "flac" : "m4a")")!, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
         super.init(); asset.resourceLoader.setDelegate(self, queue: queue)
     }
     /// Older systems keep the file path because they cannot tap HLS audio for the spectrum.
@@ -179,7 +182,7 @@ public final class AudioResourceLoader: NSObject, AVAssetResourceLoaderDelegate,
                             await onQueue {
                                 guard !request.isCancelled, !request.isFinished else { return }
                                 if let info = request.contentInformationRequest {
-                                    info.contentType = UTType.mpeg4Audio.identifier; info.contentLength = total; info.isByteRangeAccessSupported = true
+                                    info.contentType = self.contentType; info.contentLength = total; info.isByteRangeAccessSupported = true
                                 }
                                 if upper > lower, upper <= chunk.data.count {
                                     self.onDelivery(); request.dataRequest?.respond(with: chunk.data.subdata(in: lower..<upper))

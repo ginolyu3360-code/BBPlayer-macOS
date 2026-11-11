@@ -48,6 +48,8 @@ public struct Track: Codable, Hashable, Identifiable, Sendable {
     public var coverURL: URL?
     public var duration: Double
     public var source: String
+    public var localFileURL: URL?
+    public var localFileBookmark: Data?
     public init(bvid: String, cid: Int64? = nil, title: String, artist: String = "", coverURL: URL? = nil, duration: Double = 0, source: String = "bilibili") {
         self.bvid = bvid; self.cid = cid; self.title = title; self.artist = artist
         self.coverURL = coverURL; self.duration = duration; self.source = source
@@ -90,8 +92,10 @@ public struct AudioStreamInfo: Codable, Equatable, Sendable {
     public var codec: String
     public var bitrate: Int?
     public var sampleRate: Int?
-    public init(codec: String, bitrate: Int? = nil, sampleRate: Int? = nil) {
-        self.codec = codec
+    public var quality: AudioQuality?
+    public var fallbackReason: String?
+    public init(codec: String, bitrate: Int? = nil, sampleRate: Int? = nil, quality: AudioQuality? = nil, fallbackReason: String? = nil) {
+        self.codec = codec; self.quality = quality; self.fallbackReason = fallbackReason
         self.bitrate = bitrate.flatMap { $0 > 0 ? $0 : nil }
         self.sampleRate = sampleRate.flatMap { $0 > 0 ? $0 : nil }
     }
@@ -148,8 +152,11 @@ public struct PlayerPreferences: Codable, Sendable {
     public var floatingLocked = true
     public var showTranslation = true
     public var showRomanization = true
+    public var audioQuality: AudioQuality? = nil
+    public var equalizer: AudioEqualizerSettings? = nil
     public var prefetchNextTrack: Bool? = nil
     public var cacheLimit: Int64 = 1_073_741_824
+    public var lyricPresentation: LyricPresentation? = nil
     public var lyricOffset: Double = 0
     public var volume: Double = 0.8
     public var appearance = "system"
@@ -176,10 +183,12 @@ public enum APIError: Error, LocalizedError, Sendable, Equatable {
 
 public protocol MediaSourceProvider: Sendable {
     func search(_ query: String, page: Int) async throws -> [Track]
+    func resolve(_ track: Track, quality: AudioQuality) async throws -> ResolvedAudio
     func resolve(_ track: Track) async throws -> ResolvedAudio
     func chapters(for track: Track) async throws -> [Chapter]
 }
 public extension MediaSourceProvider {
+    func resolve(_ track: Track, quality: AudioQuality) async throws -> ResolvedAudio { try await resolve(track) }
     func chapters(for track: Track) async throws -> [Chapter] { [] }
 }
 

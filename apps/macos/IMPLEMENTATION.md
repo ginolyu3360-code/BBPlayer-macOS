@@ -48,7 +48,6 @@ Release on user's M2: median process-cold interactive startup <=2 s over three l
 
 Verified: public AAC streaming and byte-range seek, real PCM spectrum, loudness math, native floating panel, real theme images/video/SVGA. True expired-token recovery and authenticated media still need dedicated acceptance. See VALIDATION.md; do not claim all gates or all fault cases passed.
 
-
 ## Evidence recorded during implementation (2026-10-22)
 
 - Added native Swift package, explicit Xcode project, SwiftUI/AppKit app, core audio/network/storage/lyrics/theme/import/download services, and local packaging script. No phone/backend source changed.
@@ -102,7 +101,6 @@ Current backlog is `TODO.md`. Subsequent authorized work added deletion confirma
 
 Latest verification: 43 core + 3 AppKit tests, isolated model workflows and four visually inspected native renders; local Release app packaging and strict signature verification passed. Evidence is in `VALIDATION.md` and `validation/library-workflows-20261023.json`. Pointer interaction, new performance measurements and authenticated acceptance remain open. Work is uncommitted on `feature/library-workflow-improvements`; no merge, push or installed-app replacement occurred.
 
-
 ## Playback startup, prefetch and rolling cache (2026-10-26)
 
 Implemented the approved native playback scope on the current feature branch. Highest ordinary AAC selection is unchanged. Chapters are fetched independently with playback-generation checks; track inspection and spectrum setup no longer block initial item creation. The custom loader delivers 16 KiB network increments while persisting complete 256 KiB cache blocks asynchronously. AVPlayer prediction waiting is disabled; buffer recovery retains playback intent and waits for approximately two seconds of playable media after an underrun. Pausing, switching, preview changes and shutdown cancel obsolete work.
@@ -114,3 +112,9 @@ Current and prefetched playback share the same sequential/shuffle/list-loop next
 The default managed temporary-cache budget remains 1 GiB. A utility writer maintains a size/LRU index and reserves actual encoded bytes before atomic writes, including temporary replacement space. Reads protect individual chunks; old consumed chunks may be evicted from the same long resource. Slow disk operations do not hold the playback-admission lock. Pending payload writes are bounded to 8 MiB and discarded when full; disk failures do not prevent delivery. At most four foreground chunk transfers and four recent completed chunks are retained per active loader. Manual downloads remain separate and preserve asynchronously acquired chapters in offline metadata.
 
 Verification: 68 core and 10 AppKit tests passed; Release packaging and persistent-signature verification passed. Controlled aggregate 2 Mb/s / 100 ms RTT tests passed five ordinary cold starts, five unprefetched switches, five indexed cold starts and five prefetched switches, all below two seconds. Complete phases, retained real-network failures and limits are in `validation/startup-streaming-20261026.json` and `VALIDATION.md`. Large offsets/lengths are simulated rather than claimed as a real multi-GiB transfer. At the 2026-10-26 verification checkpoint, no commit, push, merge, installation or external review had been performed. The Release was subsequently installed locally on 2026-10-27 after explicit authorization, with persistent-signature and complete-file verification followed by duplicate cleanup. Existing mobile edits remain unmodified, unvalidated and excluded from this Mac delivery. Any subsequent push requires a rebuild and verified local replacement from the pushed source.
+
+## Personal dual-platform implementation (2026-11-11)
+
+The current working tree adds stable song/source identity and protected replacement, typed portable backup/merge/restore, automatic protection, original local-file references/relinking, bounded playback recovery, causal LAN synchronization and local recording, pinned TLS pairing/revocation, optional audio quality selection/EQ, a shared-engine mini player and lyric appearance presets. The personal Android variant implements the corresponding library/sync/audio paths and preserves its existing player services.
+
+See `docs/personal-dual-platform.md` at the repository root for user workflows and boundaries. Earlier pending lists are historical; device acceptance remains open. No current implementation record authorizes installation, Git publication or contacting another repository. Audio capability selection and generated PCM checks are not physical decoder/output acceptance.

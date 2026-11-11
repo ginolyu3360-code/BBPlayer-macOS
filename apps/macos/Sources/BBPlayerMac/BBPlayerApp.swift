@@ -25,6 +25,7 @@ import SwiftUI
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("播放") {
+                Button("迷你播放器") { model?.compactPlayer.toggle() }.keyboardShortcut("m", modifiers: [.command, .shift]).disabled(model == nil)
                 Button("播放 / 暂停") { model?.player.toggle() }.keyboardShortcut(.space, modifiers: [.command, .shift])
                 Button("上一首") { model?.player.previous() }.keyboardShortcut(.leftArrow, modifiers: .command)
                 Button("下一首") { model?.player.next() }.keyboardShortcut(.rightArrow, modifiers: .command)
@@ -101,6 +102,7 @@ struct MenuBarControls: View {
         Toggle("桌面歌词", isOn: Binding(get: { model.player.preferences.floatingLyrics }, set: { model.player.preferences.floatingLyrics = $0; model.updateVisibility() }))
         Toggle("锁定歌词（点击穿透）", isOn: Binding(get: { model.player.preferences.floatingLocked }, set: { model.player.preferences.floatingLocked = $0; model.updateVisibility() }))
         Divider()
+        Button("迷你播放器") { model.compactPlayer.toggle() }
         Button("打开 BBPlayer") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true); model.mainWindowVisible = true; model.updateVisibility() }
         Button("退出 BBPlayer") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }

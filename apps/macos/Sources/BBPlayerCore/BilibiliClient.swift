@@ -133,24 +133,27 @@ public actor BilibiliClient: MediaSourceProvider {
         let body = try await request("/x/player/pagelist", parameters: ["bvid": track.bvid])
         return body.array("_items").map { track.withPage(cid: $0.int64("cid"), title: $0.string("part"), duration: $0.double("duration")) }
     }
-    public func resolve(_ input: Track) async throws -> ResolvedAudio {
+    public func resolve(_ input: Track) async throws -> ResolvedAudio { try await resolve(input, quality: .aac) }
+    public func resolve(_ input: Track, quality: AudioQuality) async throws -> ResolvedAudio {
+        if input.source == "local" { return ResolvedAudio(track: input, url: try LocalMusic.resolve(input)) }
         var track = input
         if track.cid == nil {
             let pages = try await pages(track)
             guard let first = pages.first else { throw APIError.unavailable("该视频没有可播放的分 P。") }
-            track = track.withPage(cid: first.cid!, title: nil, duration: first.duration)
+            // Default-part resolution enriches this source's playback coordinates.
+            // Explicit selection in pages() still creates a separate part source.
+            track.cid = first.cid
+            track.duration = first.duration
         }
         let body = try await request("/x/player/wbi/playurl", parameters: ["bvid": track.bvid, "cid": String(track.cid!), "fnval": "4048", "fnver": "0", "fourk": "1", "qlt": "30280", "voice_balance": "1"], signed: true)
-        let streams = body.object("dash").array("audio").filter {
-            let codec = $0.string("codecs").lowercased()
-            return codec.isEmpty || codec.hasPrefix("mp4a")
-        }.sorted { $0.int("bandwidth") > $1.int("bandwidth") }
-        guard let stream = streams.first, let url = URL(string: stream.string("baseUrl", fallback: "base_url")), url.scheme == "https" else { throw APIError.unavailable("没有可用的常规 AAC 音轨。") }
+        let selected = try AudioStreamSelection.select(body, preference: quality)
+        let stream = selected.stream
+        guard let url = URL(string: stream.string("baseUrl", fallback: "base_url")) else { throw APIError.invalidResponse }
         let backups = (stream["backupUrl"] ?? stream["backup_url"]) as? [String] ?? []
         let volume = body.object("volume")
         return ResolvedAudio(track: track, url: url, backupURLs: backups.compactMap(URL.init(string:)), headers: headers(authenticated: false),
             measuredLoudness: volume["measured_i"] as? Double, targetLoudness: volume["target_i"] as? Double,
-            chapters: [], streamInfo: AudioStreamInfo(codec: stream.string("codecs"), bitrate: stream.int("bandwidth"), sampleRate: max(stream.int("audioSampleRate"), stream.int("audio_sample_rate"))))
+            chapters: [], streamInfo: AudioStreamInfo(codec: stream.string("codecs"), bitrate: stream.int("bandwidth"), sampleRate: max(stream.int("audioSampleRate"), stream.int("audio_sample_rate")), quality: selected.quality, fallbackReason: selected.reason))
     }
     public func chapters(for track: Track) async throws -> [Chapter] {
         guard let cid = track.cid else { return [] }

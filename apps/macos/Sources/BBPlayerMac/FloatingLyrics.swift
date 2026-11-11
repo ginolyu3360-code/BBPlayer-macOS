@@ -59,7 +59,7 @@ struct FloatingLyricsView: View {
     @Bindable var model: AppModel
     private var line: LyricLine? { let lyrics = model.player.lyrics; return lyrics.index(at: model.player.position + model.player.preferences.lyricOffset).map { lyrics.lines[$0] } }
     var body: some View {
-        FloatingLyricText(line: line, fallback: model.player.currentTrack?.title ?? "BBPlayer", position: model.player.position + model.player.preferences.lyricOffset + model.player.lyrics.offset, romanization: model.player.preferences.showRomanization, translation: model.player.preferences.showTranslation, locked: model.player.preferences.floatingLocked) { height in model.floatingController?.fitHeight(height + (model.player.preferences.floatingLocked ? 0 : 24)) }
+        FloatingLyricText(line: line, fallback: model.player.currentTrack?.title ?? "BBPlayer", position: model.player.position + model.player.preferences.lyricOffset + model.player.lyrics.offset, romanization: model.player.preferences.showRomanization, translation: model.player.preferences.showTranslation, locked: model.player.preferences.floatingLocked, presentation: model.player.preferences.lyricPresentation ?? LyricPresentation()) { height in model.floatingController?.fitHeight(height + (model.player.preferences.floatingLocked ? 0 : 24)) }
             .padding(.horizontal, 18).padding(.bottom, 18).padding(.top, model.player.preferences.floatingLocked ? 18 : 42)
             .background(model.player.preferences.floatingLocked ? Color.clear : Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 16))
             .overlay(alignment: .top) { if !model.player.preferences.floatingLocked {
@@ -79,10 +79,11 @@ struct FloatingLyricText: NSViewRepresentable {
     let romanization: Bool
     let translation: Bool
     let locked: Bool
+    var presentation = LyricPresentation()
     let heightChanged: (CGFloat) -> Void
     func makeNSView(context: Context) -> LyricScrollText { LyricScrollText() }
     func updateNSView(_ view: LyricScrollText, context: Context) {
-        view.render(line: line, fallback: fallback, position: position, romanization: romanization, translation: translation, locked: locked, heightChanged: heightChanged)
+        view.render(line: line, fallback: fallback, position: position, romanization: romanization, translation: translation, locked: locked, presentation: presentation.normalized, heightChanged: heightChanged)
     }
 }
 
@@ -108,26 +109,26 @@ final class LyricScrollText: NSScrollView {
         documentView = lyricsText
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func render(line: LyricLine?, fallback: String, position: Double, romanization: Bool, translation: Bool, locked: Bool, heightChanged: @escaping (CGFloat) -> Void) {
+    func render(line: LyricLine?, fallback: String, position: Double, romanization: Bool, translation: Bool, locked: Bool, presentation: LyricPresentation = LyricPresentation(), heightChanged: @escaping (CGFloat) -> Void) {
         self.locked = locked; self.heightChanged = heightChanged
         lyricsText.dragEnabled = !locked
         let original = line?.text ?? fallback
         manualOrigin = !locked && originalText == original ? contentView.bounds.origin : nil
         originalText = original
         hasVerticalScroller = !locked
-        let style = NSMutableParagraphStyle(); style.alignment = .center; style.lineBreakMode = .byCharWrapping; style.paragraphSpacing = 8
+        let style = NSMutableParagraphStyle(); style.alignment = .center; style.lineBreakMode = .byCharWrapping; style.paragraphSpacing = presentation.spacing / 3
         let shadow = NSShadow(); shadow.shadowColor = NSColor.black; shadow.shadowBlurRadius = 3; shadow.shadowOffset = NSSize(width: 0, height: -1)
         func attributes(_ size: CGFloat) -> [NSAttributedString.Key: Any] { [.font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor.white, .paragraphStyle: style, .shadow: shadow] }
-        let content = NSMutableAttributedString(string: original, attributes: attributes(31))
-        if romanization, let value = line?.romanization, !value.isEmpty { content.append(NSAttributedString(string: "\n" + value, attributes: attributes(14))) }
-        if translation, let value = line?.translation, !value.isEmpty { content.append(NSAttributedString(string: "\n" + value, attributes: attributes(18))) }
+        let content = NSMutableAttributedString(string: original, attributes: attributes(presentation.fontSize * 1.24))
+        if romanization, let value = line?.romanization, !value.isEmpty { content.append(NSAttributedString(string: "\n" + value, attributes: attributes(presentation.fontSize * presentation.translationRatio * 0.85))) }
+        if translation, let value = line?.translation, !value.isEmpty { content.append(NSAttributedString(string: "\n" + value, attributes: attributes(presentation.fontSize * presentation.translationRatio))) }
         var offset = 0, active = 0
         if let line, !line.words.isEmpty {
             for word in line.words {
                 let length = (word.text as NSString).length
                 if offset + length <= (original as NSString).length {
                     if position >= word.start { active = offset }
-                    if position >= word.start && position < word.end { content.addAttribute(.foregroundColor, value: NSColor.systemCyan, range: NSRange(location: offset, length: length)) }
+                    if position >= word.start && position < word.end { content.addAttribute(.foregroundColor, value: presentation.accent ? NSColor.systemCyan : NSColor.white, range: NSRange(location: offset, length: length)) }
                 }
                 offset += length
             }
