@@ -11,6 +11,7 @@ import { Touchable } from 'react-native-gesture-handler'
 import { useTheme } from 'react-native-paper'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
+import IconButton from '@/components/common/IconButton'
 import { analyticsService } from '@/lib/services/analyticsService'
 import { toastAndLogError } from '@/utils/error-handling'
 import * as Haptics from '@/utils/haptics'
@@ -26,6 +27,7 @@ const playPauseSource =
 interface MainPlaybackControlsProps {
 	size?: 'normal' | 'compact'
 	onInteraction?: () => void
+	podcastSeek?: { enabled: boolean; onSeek: (seconds: number) => void }
 }
 
 /**
@@ -35,6 +37,7 @@ interface MainPlaybackControlsProps {
 export function MainPlaybackControls({
 	size = 'normal',
 	onInteraction,
+	podcastSeek,
 }: MainPlaybackControlsProps) {
 	const { colors } = useTheme()
 	const isPlaying = useIsPlaying()
@@ -133,33 +136,43 @@ export function MainPlaybackControls({
 
 	return (
 		<View style={[styles.mainControlsContainer, { gap }]}>
-			<Touchable
-				androidRipple={{}}
-				style={{
-					width: skipButtonSize,
-					height: skipButtonSize,
-					justifyContent: 'center',
-					alignItems: 'center',
-					borderRadius: 99999,
-				}}
-				onPress={() => {
-					onInteraction?.()
-					void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-					prevLottieRef.current?.play(0, 60)
-					void Orpheus.skipToPrevious()
-					void analyticsService.logPlayerAction('skip_prev')
-				}}
-				testID='player-prev'
-			>
-				<LottieView
-					ref={prevLottieRef}
-					source={tintedSkipPrev}
-					style={{ width: '100%', height: '100%' }}
-					autoPlay={false}
-					speed={2}
-					loop={false}
+			{podcastSeek ? (
+				<IconButton
+					icon='rewind-15'
+					accessibilityLabel='后退 15 秒'
+					disabled={!podcastSeek.enabled}
+					onPress={() => podcastSeek.onSeek(-15)}
+					testID='podcast-rewind'
 				/>
-			</Touchable>
+			) : (
+				<Touchable
+					androidRipple={{}}
+					style={{
+						width: skipButtonSize,
+						height: skipButtonSize,
+						justifyContent: 'center',
+						alignItems: 'center',
+						borderRadius: 99999,
+					}}
+					onPress={() => {
+						onInteraction?.()
+						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+						prevLottieRef.current?.play(0, 60)
+						void Orpheus.skipToPrevious()
+						void analyticsService.logPlayerAction('skip_prev')
+					}}
+					testID='player-prev'
+				>
+					<LottieView
+						ref={prevLottieRef}
+						source={tintedSkipPrev}
+						style={{ width: '100%', height: '100%' }}
+						autoPlay={false}
+						speed={2}
+						loop={false}
+					/>
+				</Touchable>
+			)}
 			<Touchable
 				androidRipple={{}}
 				style={{
@@ -206,43 +219,64 @@ export function MainPlaybackControls({
 					/>
 				)}
 			</Touchable>
-			<Touchable
-				androidRipple={{}}
-				style={{
-					width: skipButtonSize,
-					height: skipButtonSize,
-					justifyContent: 'center',
-					alignItems: 'center',
-					borderRadius: 99999,
-				}}
-				onPress={() => {
-					onInteraction?.()
-					void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-					nextLottieRef.current?.play(0, 60)
-					void Orpheus.skipToNext()
-					void analyticsService.logPlayerAction('skip_next')
-				}}
-				testID='player-next'
-			>
-				<LottieView
-					ref={nextLottieRef}
-					source={tintedSkipNext}
-					style={{ width: '100%', height: '100%' }}
-					autoPlay={false}
-					speed={2}
-					loop={false}
+			{podcastSeek ? (
+				<IconButton
+					icon='fast-forward-15'
+					accessibilityLabel='前进 15 秒'
+					disabled={!podcastSeek.enabled}
+					onPress={() => podcastSeek.onSeek(15)}
+					testID='podcast-forward'
 				/>
-			</Touchable>
+			) : (
+				<Touchable
+					androidRipple={{}}
+					style={{
+						width: skipButtonSize,
+						height: skipButtonSize,
+						justifyContent: 'center',
+						alignItems: 'center',
+						borderRadius: 99999,
+					}}
+					onPress={() => {
+						onInteraction?.()
+						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+						nextLottieRef.current?.play(0, 60)
+						void Orpheus.skipToNext()
+						void analyticsService.logPlayerAction('skip_next')
+					}}
+					testID='player-next'
+				>
+					<LottieView
+						ref={nextLottieRef}
+						source={tintedSkipNext}
+						style={{ width: '100%', height: '100%' }}
+						autoPlay={false}
+						speed={2}
+						loop={false}
+					/>
+				</Touchable>
+			)}
 		</View>
 	)
 }
 
 export function SecondaryPlaybackControls({
 	children,
+	compact = false,
 }: {
 	children: React.ReactNode
+	compact?: boolean
 }) {
-	return <View style={styles.secondaryControlsContainer}>{children}</View>
+	return (
+		<View
+			style={[
+				styles.secondaryControlsContainer,
+				compact && styles.compactSecondaryControls,
+			]}
+		>
+			{children}
+		</View>
+	)
 }
 
 const styles = StyleSheet.create({
@@ -257,5 +291,9 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 		gap: 32,
+	},
+	compactSecondaryControls: {
+		flexWrap: 'wrap',
+		gap: 12,
 	},
 })

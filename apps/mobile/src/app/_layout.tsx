@@ -310,6 +310,11 @@ function RootLayout() {
 						/>
 
 						<Stack.Screen
+							name='podcast-subtitles'
+							options={{ headerShown: false }}
+						/>
+
+						<Stack.Screen
 							name='test'
 							options={{ headerShown: false }}
 						/>
