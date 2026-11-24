@@ -3,6 +3,7 @@ import { observable } from '@legendapp/state'
 // 这些路由根节点（含其全部子路由）不展示播放条。
 export const HIDDEN_SEGMENT_ROOTS = new Set([
 	'player',
+	'podcast-subtitles',
 	'comments',
 	'onboarding',
 	'settings',

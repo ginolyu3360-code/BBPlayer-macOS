@@ -452,8 +452,20 @@ interface BilibiliSearchSuggestionItem {
 	type: string
 }
 
+export interface BilibiliSubtitleTrack {
+	id?: number
+	id_str?: string
+	lan?: string
+	lan_doc?: string
+	subtitle_url?: string
+}
+
 interface BilibiliWebPlayerInfo {
 	view_points?: { type?: number; from: number; to: number; content: string }[]
+	need_login_subtitle?: boolean
+	subtitle?: {
+		subtitles?: BilibiliSubtitleTrack[]
+	}
 	bgm_info?: {
 		music_id: number
 		music_title: string

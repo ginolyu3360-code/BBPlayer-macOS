@@ -45,6 +45,10 @@ The Mac mini player uses the same engine and queue, with seek, volume, pinning, 
 
 Lyric appearance settings provide size, spacing, translation proportions, highlighting, edge masking, clear/compact/large presets, preview and reset. Appearance stays local to each device; timed lyric content remains source-specific.
 
+Android's podcast controls place 15-second backward and forward jumps beside play/pause. Open the subtitle button on a Bilibili track to read and search its available subtitle tracks, highlight the current cue, jump to a line, or export the selected language as SRT. Subtitles are retrieved on demand for the current video part and remain separate from library lyrics, backups and LAN sync. This workflow was inspired by the [bbplayer-app/BBPlayer v2.8.2 release](https://github.com/bbplayer-app/BBPlayer/releases/tag/v2.8.2).
+
+Retrying subtitles refreshes the download URL and retains the selected track. The reader refreshes the current cue after returning to the foreground. Android's media notification provider handles a denied foreground start during asynchronous artwork updates without swallowing other errors.
+
 ## Local build and verification
 
 Run JavaScript checks from the repository root:

@@ -15,7 +15,6 @@ import {
 } from 'react-native-reanimated'
 import { scheduleOnRN } from 'react-native-worklets'
 
-import IconButton from '@/components/common/IconButton'
 import { usePlayerChapters } from '@/features/player/hooks/usePlayerChapters'
 import {
 	chapterIndexAt,
@@ -145,10 +144,10 @@ export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
 	}, [isPlaying, isPlayingShared])
 
 	const handleSeek = useCallback(
-		async (time: number, relative = false) => {
+		async (time: number) => {
 			if (!trackId) return
 			try {
-				const target = await seekWithinTrack(trackId, time, relative)
+				const target = await seekWithinTrack(trackId, time)
 				if (target !== null) {
 					position.set(target)
 					seekPosition.set(target)
@@ -337,59 +336,34 @@ export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
 					}}
 				/>
 			)}
-			<View style={podcast ? styles.podcastSliderRow : undefined}>
-				{podcast && (
-					<IconButton
-						icon='rewind-15'
-						accessibilityLabel='后退 15 秒'
-						disabled={!canSeek}
-						style={styles.seekButton}
-						onPress={() => {
-							void handleSeek(-15, true)
-						}}
-					/>
-				)}
-				<WavySlider
-					style={podcast ? styles.podcastSlider : styles.slider}
-					enabled={canSeek}
-					chapterMarkers={markers}
-					progress={progressFraction}
-					// bufferedProgress={bufferedFraction} 缓冲进度条在使用自定义 slider 时会出现一些样式问题，懒得修复了，反正音乐播放器不是很需要这个东西。
-					colors={sliderColors}
-					waveLength={30}
-					waveVelocity={animatedWaveVelocity}
-					waveDirection='head'
-					waveHeight={animatedWaveHeight}
-					waveThickness={animatedWaveThickness}
-					trackThickness={animatedTrackThickness}
-					thumbImageUri={sliderThumb?.normal}
-					thumbImageDragLeftUri={sliderThumb?.dragLeft}
-					thumbImageDragRightUri={sliderThumb?.dragRight}
-					thumbImageSize={hasSkinSliderThumb ? skinSliderThumbSize : undefined}
-					thumbImageOffsetX={
-						hasSkinSliderThumb ? skinSliderThumbOffsetX : undefined
-					}
-					thumbImageOffsetY={
-						hasSkinSliderThumb ? skinSliderThumbOffsetY : undefined
-					}
-					incremental={false}
-					onValueChange={handleValueChange}
-					onValueChangeFinished={handleValueChangeFinished}
-					onDragStateChange={handleDragStateChange}
-				/>
-
-				{podcast && (
-					<IconButton
-						icon='fast-forward-15'
-						accessibilityLabel='前进 15 秒'
-						disabled={!canSeek}
-						style={styles.seekButton}
-						onPress={() => {
-							void handleSeek(15, true)
-						}}
-					/>
-				)}
-			</View>
+			<WavySlider
+				style={styles.slider}
+				enabled={canSeek}
+				chapterMarkers={markers}
+				progress={progressFraction}
+				// bufferedProgress={bufferedFraction} 缓冲进度条在使用自定义 slider 时会出现一些样式问题，懒得修复了，反正音乐播放器不是很需要这个东西。
+				colors={sliderColors}
+				waveLength={30}
+				waveVelocity={animatedWaveVelocity}
+				waveDirection='head'
+				waveHeight={animatedWaveHeight}
+				waveThickness={animatedWaveThickness}
+				trackThickness={animatedTrackThickness}
+				thumbImageUri={sliderThumb?.normal}
+				thumbImageDragLeftUri={sliderThumb?.dragLeft}
+				thumbImageDragRightUri={sliderThumb?.dragRight}
+				thumbImageSize={hasSkinSliderThumb ? skinSliderThumbSize : undefined}
+				thumbImageOffsetX={
+					hasSkinSliderThumb ? skinSliderThumbOffsetX : undefined
+				}
+				thumbImageOffsetY={
+					hasSkinSliderThumb ? skinSliderThumbOffsetY : undefined
+				}
+				incremental={false}
+				onValueChange={handleValueChange}
+				onValueChangeFinished={handleValueChangeFinished}
+				onDragStateChange={handleDragStateChange}
+			/>
 			<View style={styles.timeContainer}>
 				<TextWithAnimation
 					sharedPosition={displayPosition}
@@ -401,9 +375,6 @@ export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
 }
 
 const styles = StyleSheet.create({
-	podcastSliderRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-	podcastSlider: { flex: 1, height: 25 },
-	seekButton: { width: 48, height: 48, margin: 0 },
 	root: {
 		width: '100%',
 		justifyContent: 'center',

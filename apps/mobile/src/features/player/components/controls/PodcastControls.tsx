@@ -1,12 +1,18 @@
+import { useRouter } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { useTheme } from 'react-native-paper'
 
 import IconButton from '@/components/common/IconButton'
+import useCurrentTrack from '@/hooks/player/useCurrentTrack'
+import useCurrentTrackId from '@/hooks/player/useCurrentTrackId'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
+import useTrackDuration from '@/hooks/player/useTrackProgress'
 import { useModalStore } from '@/hooks/stores/useModalStore'
 import { usePlayerChaptersSheetStore } from '@/hooks/stores/usePlayerChaptersSheetStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
+import { seekWithinTrack } from '@/lib/player/seek'
+import { toastAndLogError } from '@/utils/error-handling'
 import { formatDurationToHHMMSS } from '@/utils/time'
 
 import {
@@ -15,8 +21,18 @@ import {
 } from './PlayerControlContent'
 
 export function PodcastControls() {
+	const router = useRouter()
 	const { colors } = useTheme()
 	const { speed, sleepEndTime } = usePlaybackOptions()
+	const track = useCurrentTrack()
+	const trackId = useCurrentTrackId()
+	const duration = useTrackDuration()
+	const seekBy = (seconds: number) => {
+		if (!trackId) return
+		void seekWithinTrack(trackId, seconds, true).catch((error) =>
+			toastAndLogError('跳转失败', error, 'Player.Podcast'),
+		)
+	}
 	const [now, setNow] = useState(() => Date.now())
 	useEffect(() => {
 		if (!sleepEndTime) return
@@ -58,9 +74,23 @@ export function PodcastControls() {
 	return (
 		<View>
 			<View style={{ marginTop: 24 }}>
-				<MainPlaybackControls />
+				<MainPlaybackControls
+					podcastSeek={{
+						enabled: !!trackId && Number.isFinite(duration) && duration > 0,
+						onSeek: seekBy,
+					}}
+				/>
 			</View>
-			<SecondaryPlaybackControls>
+			<SecondaryPlaybackControls compact>
+				{track?.source === 'bilibili' && track.uniqueKey === trackId && (
+					<IconButton
+						icon='closed-caption-outline'
+						size={24}
+						iconColor={colors.onSurfaceVariant}
+						onPress={() => router.push('/podcast-subtitles')}
+						accessibilityLabel='打开播客字幕'
+					/>
+				)}
 				{actions.map((action) => (
 					<IconButton
 						key={action.icon}

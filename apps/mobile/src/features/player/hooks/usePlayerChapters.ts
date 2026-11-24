@@ -27,21 +27,21 @@ export function usePlayerChapters() {
 			? track.bilibiliMetadata
 			: undefined
 	const enabled = mode === 'podcast' && !!metadata
-	// Ordinary video playback resolves its first CID in the native stream resolver too.
+	const knownCid = metadata?.cid && metadata.cid > 0 ? metadata.cid : undefined
+	// Playback uses a known CID directly, otherwise resolves the first page.
+	const needsPageLookup = enabled && !metadata?.isMultiPage && !knownCid
 	const pages = useQuery({
 		queryKey: videoDataQueryKeys.getMultiPageList(metadata?.bvid),
 		queryFn: ({ signal }) =>
 			returnOrThrowAsync(
 				bilibiliApi.getPageList({ bvid: metadata!.bvid, signal }),
 			),
-		enabled: enabled && !metadata?.isMultiPage,
+		enabled: needsPageLookup,
 		staleTime: 60 * 60 * 1000,
 		retry: 1,
 		meta: { silent: true },
 	})
-	const cid = metadata?.isMultiPage
-		? (metadata.cid ?? undefined)
-		: pages.data?.[0]?.cid
+	const cid = knownCid ?? (needsPageLookup ? pages.data?.[0]?.cid : undefined)
 	const info = useQuery({
 		queryKey: videoDataQueryKeys.getWebPlayerInfo(metadata?.bvid, cid),
 		queryFn: ({ signal }) =>
@@ -62,23 +62,27 @@ export function usePlayerChapters() {
 		() => (enabled ? normalizeChapters(info.data?.view_points, duration) : []),
 		[enabled, info.data?.view_points, duration],
 	)
-	const waitingForCid =
-		enabled && !metadata?.isMultiPage && pages.isPending && !pages.isPaused
+	const waitingForCid = needsPageLookup && pages.isPending && !pages.isPaused
 	return {
 		podcast: mode === 'podcast',
 		trackId,
 		chapters,
+		subtitleTracks: enabled ? info.data?.subtitle?.subtitles : undefined,
+		subtitlesRequireLogin: enabled && info.data?.need_login_subtitle === true,
 		isLoading:
 			waitingForCid || (enabled && !!cid && info.isPending && !info.isPaused),
 		isError:
 			enabled &&
-			((!metadata?.isMultiPage && (pages.isError || pages.isPaused)) ||
+			((needsPageLookup && (pages.isError || pages.isPaused)) ||
 				(!!cid && (info.isError || info.isPaused))),
 		isLocal: track?.source === 'local',
 		retry: async () => {
-			if (!metadata?.isMultiPage && (!cid || pages.isError))
+			if (needsPageLookup && (!cid || pages.isError || pages.isPaused)) {
 				await pages.refetch()
-			else if (cid) await info.refetch()
+			} else if (enabled && cid) {
+				const refreshed = await info.refetch()
+				if (refreshed.isSuccess) return refreshed.data.subtitle?.subtitles
+			}
 		},
 	}
 }

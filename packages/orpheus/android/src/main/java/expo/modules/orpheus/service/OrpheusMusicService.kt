@@ -1,9 +1,11 @@
 package expo.modules.orpheus.service
 
 import android.app.PendingIntent
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Build
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -28,6 +30,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -141,10 +144,6 @@ class OrpheusMusicService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
     }
 
-    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
-        super.onUpdateNotification(session, true)
-    }
-
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
@@ -154,7 +153,7 @@ class OrpheusMusicService : MediaLibraryService() {
         LoudnessStorage.initialize(this)
         TrackResumeStorage.initialize(this)
 
-        setMediaNotificationProvider(object : DefaultMediaNotificationProvider(this) {
+        val notificationProvider = object : DefaultMediaNotificationProvider(this) {
             override fun getMediaButtons(
                 session: MediaSession,
                 playerCommands: Player.Commands,
@@ -227,6 +226,29 @@ class OrpheusMusicService : MediaLibraryService() {
                 )
 
                 return builder.build()
+            }
+        }
+        setMediaNotificationProvider(object : MediaNotification.Provider by notificationProvider {
+            override fun createNotification(
+                mediaSession: MediaSession,
+                customLayout: ImmutableList<CommandButton>,
+                actionFactory: MediaNotification.ActionFactory,
+                callback: MediaNotification.Provider.Callback,
+            ): MediaNotification {
+                return notificationProvider.createNotification(mediaSession, customLayout, actionFactory) { notification ->
+                    // Media3 can request foreground service after artwork finishes loading.
+                    try {
+                        callback.onNotificationChanged(notification)
+                    } catch (error: IllegalStateException) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                            error is ForegroundServiceStartNotAllowedException
+                        ) {
+                            Log.w("OrpheusMusicService", "Deferred media notification update while backgrounded", error)
+                        } else {
+                            throw error
+                        }
+                    }
+                }
             }
         })
 
